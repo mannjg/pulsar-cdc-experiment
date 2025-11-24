@@ -1,7 +1,7 @@
 # Pulsar CDC Experiment - Complete Helm Values
 # This configuration includes the SecurityContext customizer for Kubernetes runtime
 # Chart version: pulsar-4.4.0
-# Pulsar version: 3.3.9
+# Pulsar version: 4.0.2
 
 # Initialize cluster on install
 initialize: true
@@ -10,10 +10,10 @@ initialize: true
 image:
   broker:
     repository: apachepulsar/pulsar
-    tag: 3.3.9
+    tag: 4.0.2
   function:
     repository: apachepulsar/pulsar
-    tag: 3.3.9
+    tag: 4.0.2
 
 # Zookeeper configuration - minimal setup for local testing
 zookeeper:
@@ -59,12 +59,12 @@ broker:
     # Configure Kubernetes runtime for Functions Worker
     PF_functionRuntimeFactoryClassName: "org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory"
     PF_functionRuntimeFactoryConfigs_jobNamespace: "pulsar"
-    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:3.3.9"
+    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:4.0.2"
     PF_functionRuntimeFactoryConfigs_imagePullPolicy: "IfNotPresent"
     PF_functionRuntimeFactoryConfigs_pulsarRootDir: "/pulsar"
 
-    # CRITICAL: Security customizer configuration
-    PF_runtimeCustomizerClassName: "com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer"
+    # CRITICAL: Security customizer configuration (Pulsar 4.x property name)
+    PF_kubernetesManifestCustomizerClassName: "com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer"
 
     # Pod SecurityContext settings
     PF_runtimeCustomizerConfig_podSecurityContext_runAsNonRoot: "true"

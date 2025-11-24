@@ -220,7 +220,7 @@ The broker is configured to use Kubernetes runtime:
 ```yaml
 PF_functionRuntimeFactoryClassName: org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory
 PF_functionRuntimeFactoryConfigs_jobNamespace: pulsar
-PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: apachepulsar/pulsar:3.3.9
+PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: apachepulsar/pulsar:4.0.2
 ```
 
 ### StatefulSet Pattern

@@ -97,7 +97,7 @@ Configured to run Functions and Connectors as Kubernetes Pods:
 ```yaml
 PF_functionRuntimeFactoryClassName: "org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory"
 PF_functionRuntimeFactoryConfigs_jobNamespace: "pulsar"
-PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:3.3.9"
+PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:4.0.2"
 ```
 
 ### Minimal Resource Configuration

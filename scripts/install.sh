@@ -1,0 +1,440 @@
+#!/bin/bash
+# Pulsar CDC Experiment - Automated Installation Script
+# This script performs a complete, hands-free installation of the Pulsar CDC experiment
+
+set -e  # Exit on error
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration
+NAMESPACE="pulsar"
+HELM_RELEASE_NAME="pulsar"
+PULSAR_CHART_VERSION="4.4.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Print functions
+print_header() {
+    echo -e "\n${BLUE}===================================================================${NC}"
+    echo -e "${BLUE}  $1${NC}"
+    echo -e "${BLUE}===================================================================${NC}\n"
+}
+
+print_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+# Check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check prerequisites
+check_prerequisites() {
+    print_header "Checking Prerequisites"
+    
+    local all_good=true
+    
+    if command_exists kubectl; then
+        print_success "kubectl is installed: $(kubectl version --client --short 2>/dev/null || kubectl version --client)"
+    else
+        print_error "kubectl is not installed"
+        all_good=false
+    fi
+    
+    if command_exists helm; then
+        print_success "helm is installed: $(helm version --short)"
+    else
+        print_error "helm is not installed"
+        all_good=false
+    fi
+    
+    if command_exists microk8s; then
+        print_success "microk8s is installed"
+        # Check if microk8s is running
+        if microk8s status --wait-ready --timeout=5 >/dev/null 2>&1; then
+            print_success "microk8s is running"
+        else
+            print_warning "microk8s is not running. Attempting to start..."
+            microk8s start
+            sleep 5
+        fi
+    else
+        print_warning "microk8s not detected, assuming generic Kubernetes cluster"
+    fi
+    
+    # Test kubectl connectivity
+    if kubectl cluster-info >/dev/null 2>&1; then
+        print_success "kubectl can connect to cluster"
+    else
+        print_error "kubectl cannot connect to cluster"
+        all_good=false
+    fi
+    
+    if [ "$all_good" = false ]; then
+        print_error "Prerequisites check failed. Please install missing components."
+        exit 1
+    fi
+    
+    print_success "All prerequisites satisfied"
+}
+
+# Create namespace
+create_namespace() {
+    print_header "Creating Namespace"
+    
+    if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+        print_info "Namespace $NAMESPACE already exists"
+    else
+        kubectl create namespace "$NAMESPACE"
+        print_success "Created namespace: $NAMESPACE"
+    fi
+}
+
+# Create security customizer ConfigMap
+create_security_customizer_configmap() {
+    print_header "Creating Security Customizer ConfigMap"
+    
+    local jar_path="$PROJECT_ROOT/security-customizer/target/pulsar-security-customizer-1.0.0.jar"
+    
+    if [ ! -f "$jar_path" ]; then
+        print_error "Security customizer JAR not found at: $jar_path"
+        print_info "Please build the security customizer first:"
+        print_info "  cd $PROJECT_ROOT/security-customizer"
+        print_info "  mvn clean package"
+        exit 1
+    fi
+    
+    # Check if ConfigMap exists
+    if kubectl get configmap pulsar-security-customizer -n "$NAMESPACE" >/dev/null 2>&1; then
+        print_info "ConfigMap already exists, deleting and recreating..."
+        kubectl delete configmap pulsar-security-customizer -n "$NAMESPACE"
+    fi
+    
+    kubectl create configmap pulsar-security-customizer \
+        --from-file=pulsar-security-customizer-1.0.0.jar="$jar_path" \
+        -n "$NAMESPACE"
+    
+    print_success "Created security customizer ConfigMap"
+}
+
+# Add Helm repository
+add_helm_repo() {
+    print_header "Configuring Helm Repository"
+    
+    if helm repo list | grep -q "apache.*pulsar.apache.org/charts"; then
+        print_info "Apache Pulsar Helm repository already added"
+    else
+        helm repo add apache https://pulsar.apache.org/charts
+        print_success "Added Apache Pulsar Helm repository"
+    fi
+    
+    helm repo update
+    print_success "Updated Helm repositories"
+}
+
+# Install Pulsar via Helm
+install_pulsar() {
+    print_header "Installing Apache Pulsar via Helm"
+    
+    local values_file="$PROJECT_ROOT/kubernetes/helm/pulsar-values.yaml"
+    
+    if [ ! -f "$values_file" ]; then
+        print_error "Helm values file not found at: $values_file"
+        exit 1
+    fi
+    
+    # Check if release already exists
+    if helm list -n "$NAMESPACE" | grep -q "^$HELM_RELEASE_NAME"; then
+        print_warning "Pulsar is already installed. Use 'helm upgrade' to update or './scripts/cleanup.sh' to start fresh."
+        print_info "Proceeding with the rest of the installation..."
+        return
+    fi
+    
+    print_info "Installing Pulsar (this may take several minutes)..."
+    helm install "$HELM_RELEASE_NAME" apache/pulsar \
+        --namespace "$NAMESPACE" \
+        --version "$PULSAR_CHART_VERSION" \
+        --values "$values_file" \
+        --timeout 15m
+    
+    print_success "Pulsar Helm release installed"
+}
+
+# Wait for Pulsar pods to be ready
+wait_for_pulsar() {
+    print_header "Waiting for Pulsar Pods to be Ready"
+    
+    print_info "Waiting for ZooKeeper..."
+    kubectl wait --for=condition=ready pod -l component=zookeeper \
+        --namespace "$NAMESPACE" --timeout=300s
+    print_success "ZooKeeper is ready"
+    
+    print_info "Waiting for BookKeeper..."
+    kubectl wait --for=condition=ready pod -l component=bookkeeper \
+        --namespace "$NAMESPACE" --timeout=300s
+    print_success "BookKeeper is ready"
+    
+    print_info "Waiting for Broker..."
+    kubectl wait --for=condition=ready pod -l component=broker \
+        --namespace "$NAMESPACE" --timeout=300s
+    print_success "Broker is ready"
+    
+    print_info "Waiting for Proxy..."
+    kubectl wait --for=condition=ready pod -l component=proxy \
+        --namespace "$NAMESPACE" --timeout=300s
+    print_success "Proxy is ready"
+    
+    print_success "All Pulsar components are ready"
+}
+
+# Deploy PostgreSQL
+deploy_postgres() {
+    print_header "Deploying PostgreSQL"
+    
+    local postgres_manifest="$PROJECT_ROOT/kubernetes/manifests/postgres-debezium.yaml"
+    
+    if [ ! -f "$postgres_manifest" ]; then
+        print_error "PostgreSQL manifest not found at: $postgres_manifest"
+        exit 1
+    fi
+    
+    # Check if already deployed
+    if kubectl get deployment postgres -n "$NAMESPACE" >/dev/null 2>&1; then
+        print_info "PostgreSQL already deployed"
+    else
+        kubectl apply -f "$postgres_manifest" -n "$NAMESPACE"
+        print_success "PostgreSQL manifest applied"
+    fi
+    
+    print_info "Waiting for PostgreSQL to be ready..."
+    kubectl wait --for=condition=ready pod -l app=postgres \
+        --namespace "$NAMESPACE" --timeout=300s
+    
+    print_success "PostgreSQL is ready"
+}
+
+# Copy Debezium connector to broker
+copy_debezium_connector() {
+    print_header "Copying Debezium Connector to Broker"
+    
+    local connector_path="$PROJECT_ROOT/connectors/pulsar-io-debezium-postgres-3.3.2.nar"
+    local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}')
+    
+    if [ -z "$broker_pod" ]; then
+        print_error "Could not find broker pod"
+        exit 1
+    fi
+    
+    if [ ! -f "$connector_path" ]; then
+        print_error "Debezium connector NAR not found at: $connector_path"
+        exit 1
+    fi
+    
+    print_info "Copying connector to broker pod: $broker_pod"
+    kubectl cp "$connector_path" \
+        "$NAMESPACE/$broker_pod:/pulsar/connectors/pulsar-io-debezium-postgres-3.3.2.nar"
+    
+    print_success "Debezium connector copied"
+}
+
+# Create Debezium source connector
+create_debezium_connector() {
+    print_header "Creating Debezium Source Connector"
+    
+    local connector_config="$PROJECT_ROOT/kubernetes/manifests/debezium-postgres-connector.yaml"
+    local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}')
+    
+    if [ ! -f "$connector_config" ]; then
+        print_error "Connector configuration not found at: $connector_config"
+        exit 1
+    fi
+    
+    # Check if connector already exists
+    print_info "Checking if connector already exists..."
+    if kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
+        bin/pulsar-admin sources get --tenant public --namespace default --name debezium-postgres-source >/dev/null 2>&1; then
+        print_info "Connector already exists, updating..."
+        kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
+            bin/pulsar-admin sources update \
+            --source-config-file /pulsar/conf/debezium-postgres-connector.yaml
+    else
+        # Copy config to broker
+        print_info "Copying connector configuration to broker..."
+        kubectl cp "$connector_config" \
+            "$NAMESPACE/$broker_pod:/pulsar/conf/debezium-postgres-connector.yaml"
+        
+        # Create the connector
+        print_info "Creating Debezium connector..."
+        kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
+            bin/pulsar-admin sources create \
+            --source-config-file /pulsar/conf/debezium-postgres-connector.yaml
+    fi
+    
+    print_success "Debezium connector created"
+    
+    # Wait a bit for the connector pod to start
+    print_info "Waiting for connector pod to be created..."
+    sleep 10
+}
+
+# Deploy CDC enrichment function
+deploy_cdc_function() {
+    print_header "Deploying CDC Enrichment Function"
+    
+    local function_py="$PROJECT_ROOT/functions/cdc-enrichment/cdc-enrichment-function.py"
+    local runtime_config="$PROJECT_ROOT/functions/cdc-enrichment/custom-runtime-options.json"
+    local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}')
+    
+    if [ ! -f "$function_py" ]; then
+        print_error "Function Python file not found at: $function_py"
+        exit 1
+    fi
+    
+    if [ ! -f "$runtime_config" ]; then
+        print_error "Runtime configuration not found at: $runtime_config"
+        exit 1
+    fi
+    
+    # Copy function files to broker
+    print_info "Copying function files to broker..."
+    kubectl cp "$function_py" \
+        "$NAMESPACE/$broker_pod:/pulsar/conf/cdc-enrichment-function.py"
+    kubectl cp "$runtime_config" \
+        "$NAMESPACE/$broker_pod:/pulsar/conf/custom-runtime-options.json"
+    
+    # Check if function already exists
+    print_info "Checking if function already exists..."
+    if kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
+        bin/pulsar-admin functions get --tenant public --namespace default --name cdc-enrichment >/dev/null 2>&1; then
+        print_info "Function already exists, updating..."
+        kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
+            bin/pulsar-admin functions update \
+            --py /pulsar/conf/cdc-enrichment-function.py \
+            --classname cdc_enrichment_function.CDCEnrichmentFunction \
+            --tenant public \
+            --namespace default \
+            --name cdc-enrichment \
+            --inputs persistent://public/default/dbserver1.public.customers \
+            --output persistent://public/default/dbserver1.public.customers-enriched \
+            --custom-runtime-options-file /pulsar/conf/custom-runtime-options.json
+    else
+        # Create the function
+        print_info "Creating CDC enrichment function..."
+        kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
+            bin/pulsar-admin functions create \
+            --py /pulsar/conf/cdc-enrichment-function.py \
+            --classname cdc_enrichment_function.CDCEnrichmentFunction \
+            --tenant public \
+            --namespace default \
+            --name cdc-enrichment \
+            --inputs persistent://public/default/dbserver1.public.customers \
+            --output persistent://public/default/dbserver1.public.customers-enriched \
+            --custom-runtime-options-file /pulsar/conf/custom-runtime-options.json
+    fi
+    
+    print_success "CDC enrichment function deployed"
+    
+    # Wait for function pod to start
+    print_info "Waiting for function pod to be created..."
+    sleep 10
+}
+
+# Display deployment status
+display_status() {
+    print_header "Deployment Status"
+    
+    echo -e "${BLUE}Pulsar Pods:${NC}"
+    kubectl get pods -n "$NAMESPACE" -l app=pulsar
+    
+    echo -e "\n${BLUE}PostgreSQL:${NC}"
+    kubectl get pods -n "$NAMESPACE" -l app=postgres
+    
+    echo -e "\n${BLUE}Debezium Connector:${NC}"
+    local connector_pod=$(kubectl get pods -n "$NAMESPACE" -l compute-type=source 2>/dev/null | grep debezium-postgres-source | awk '{print $1}' || echo "Not found yet")
+    if [ "$connector_pod" != "Not found yet" ]; then
+        kubectl get pod "$connector_pod" -n "$NAMESPACE"
+    else
+        echo "Connector pod is still being created..."
+    fi
+    
+    echo -e "\n${BLUE}CDC Enrichment Function:${NC}"
+    local function_pod=$(kubectl get pods -n "$NAMESPACE" -l compute-type=function 2>/dev/null | grep cdc-enrichment | awk '{print $1}' || echo "Not found yet")
+    if [ "$function_pod" != "Not found yet" ]; then
+        kubectl get pod "$function_pod" -n "$NAMESPACE"
+    else
+        echo "Function pod is still being created..."
+    fi
+}
+
+# Display next steps
+display_next_steps() {
+    print_header "Installation Complete!"
+    
+    echo -e "${GREEN}The Pulsar CDC experiment has been successfully installed.${NC}\n"
+    
+    echo -e "${BLUE}Next Steps:${NC}"
+    echo -e "  1. Verify the installation:"
+    echo -e "     ${YELLOW}./scripts/verify.sh${NC}"
+    echo -e ""
+    echo -e "  2. Test the CDC pipeline by inserting data into PostgreSQL:"
+    echo -e "     ${YELLOW}kubectl exec -n $NAMESPACE <postgres-pod> -- psql -U postgres -d inventory -c \"INSERT INTO customers (name, email) VALUES ('Test User', 'test@example.com');\"${NC}"
+    echo -e ""
+    echo -e "  3. Monitor connector status:"
+    echo -e "     ${YELLOW}kubectl logs -n $NAMESPACE <connector-pod> -f${NC}"
+    echo -e ""
+    echo -e "  4. Monitor function status:"
+    echo -e "     ${YELLOW}kubectl logs -n $NAMESPACE <function-pod> -f${NC}"
+    echo -e ""
+    echo -e "  5. Consume messages from the enriched topic:"
+    echo -e "     ${YELLOW}kubectl exec -n $NAMESPACE <broker-pod> -- bin/pulsar-client consume persistent://public/default/dbserver1.public.customers-enriched -s test-sub -n 0${NC}"
+    echo -e ""
+    echo -e "${BLUE}Documentation:${NC}"
+    echo -e "  - Installation Guide: ${YELLOW}INSTALL.md${NC}"
+    echo -e "  - Architecture: ${YELLOW}docs/architecture.md${NC}"
+    echo -e "  - Troubleshooting: ${YELLOW}docs/troubleshooting.md${NC}"
+    echo -e ""
+    echo -e "${BLUE}Cleanup:${NC}"
+    echo -e "  To remove the installation: ${YELLOW}./scripts/cleanup.sh${NC}"
+}
+
+# Main installation flow
+main() {
+    print_header "Pulsar CDC Experiment - Automated Installation"
+    print_info "Starting installation at $(date)"
+    
+    check_prerequisites
+    create_namespace
+    create_security_customizer_configmap
+    add_helm_repo
+    install_pulsar
+    wait_for_pulsar
+    deploy_postgres
+    copy_debezium_connector
+    create_debezium_connector
+    deploy_cdc_function
+    display_status
+    display_next_steps
+    
+    print_info "Installation completed at $(date)"
+}
+
+# Run main function
+main "$@"

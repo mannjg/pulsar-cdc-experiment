@@ -48,84 +48,48 @@ Pulsar Topic: dbserver1.public.customers-enriched
 
 ## Quick Start
 
+### Automated Installation (Recommended)
+
+The easiest way to install the Pulsar CDC experiment is using the automated installation script:
+
+```bash
+# Run the automated installation
+./scripts/install.sh
+
+# Verify the installation
+./scripts/verify.sh
+
+# Test the CDC pipeline
+kubectl exec -n pulsar $(kubectl get pods -n pulsar -l app=postgres -o jsonpath='{.items[0].metadata.name}') -- \
+  psql -U postgres -d inventory -c "INSERT INTO customers (name, email) VALUES ('Test User', 'test@example.com');"
+```
+
+**That's it!** The installation script will:
+- ✅ Check prerequisites (kubectl, helm, cluster connectivity)
+- ✅ Create the pulsar namespace
+- ✅ Deploy the security customizer ConfigMap
+- ✅ Install Pulsar 4.0.2 via Helm
+- ✅ Deploy PostgreSQL with CDC configuration
+- ✅ Create the Debezium source connector
+- ✅ Deploy the CDC enrichment function
+- ✅ Verify all components are running
+
+For detailed installation instructions, troubleshooting, and manual installation steps, see [INSTALL.md](INSTALL.md).
+
 ### Prerequisites
 
-- Kubernetes cluster (tested on microk8s)
-- Helm 3.x
-- kubectl configured for your cluster
+- **Kubernetes cluster** (1.29+, tested on microk8s)
+- **Helm 3.x**
+- **kubectl** configured for your cluster
+- **4 CPU cores, 8 GB RAM minimum** (16 GB recommended)
 
-### Deployment
+### Cleanup
 
-1. **Deploy the SecurityContext Customizer ConfigMap**
+To remove the installation completely:
 
-   First, create the ConfigMap containing the customizer JAR:
-   ```bash
-   # Export the customizer ConfigMap from running cluster
-   kubectl get configmap pulsar-security-customizer -n pulsar -o yaml > customizer-configmap.yaml
-
-   # Or build from source (see security-customizer/README.md)
-   cd security-customizer
-   mvn clean package
-   # Then create ConfigMap with the JAR
-   ```
-
-2. **Install Pulsar via Helm**
-
-   ```bash
-   # Add Apache Pulsar Helm repository
-   helm repo add apache https://pulsar.apache.org/charts
-   helm repo update
-
-   # Create namespace
-   kubectl create namespace pulsar
-
-   # Apply the security customizer ConfigMap
-   kubectl apply -f <path-to-customizer-configmap.yaml> -n pulsar
-
-   # Install Pulsar with custom values
-   helm install pulsar apache/pulsar \
-     --namespace pulsar \
-     --version 4.4.0 \
-     --values kubernetes/helm/pulsar-values.yaml
-
-   # Wait for all pods to be ready
-   kubectl wait --for=condition=ready pod -l app=pulsar --namespace pulsar --timeout=300s
-   ```
-
-3. **Deploy PostgreSQL**
-
-   ```bash
-   kubectl apply -f kubernetes/manifests/postgres-debezium.yaml -n pulsar
-   ```
-
-4. **Create Debezium Source Connector**
-
-   ```bash
-   # Access the toolset pod
-   kubectl exec -it pulsar-toolset-0 -n pulsar -- bash
-
-   # Upload the connector NAR if not already present
-   # (The connector should be in /pulsar/connectors/)
-
-   # Create the connector from the configuration
-   bin/pulsar-admin sources create \
-     --source-config-file /path/to/debezium-connector-config.yaml
-   ```
-
-5. **Deploy CDC Enrichment Function**
-
-   ```bash
-   # From the toolset pod
-   bin/pulsar-admin functions create \
-     --py /path/to/cdc-enrichment-function.py \
-     --classname cdc_enrichment_function.CDCEnrichmentFunction \
-     --tenant public \
-     --namespace default \
-     --name cdc-enrichment \
-     --inputs persistent://public/default/dbserver1.public.customers \
-     --output persistent://public/default/dbserver1.public.customers-enriched \
-     --custom-runtime-options-file /path/to/custom-runtime-options.json
-   ```
+```bash
+./scripts/cleanup.sh
+```
 
 ## Directory Structure
 
@@ -217,18 +181,15 @@ The Debezium PostgreSQL connector currently fails with a Jackson library version
 java.lang.NoSuchMethodError: 'boolean com.fasterxml.jackson.databind.util.NativeImageUtil.isInNativeImage()'
 ```
 
-**Root Cause:** Kafka Connect 3.9.0 (used by Debezium) requires Jackson 2.17.2 features that are not available in Pulsar 3.3.9's bundled Jackson version.
+**Root Cause:** Kafka Connect 3.9.0 (used by Debezium) requires Jackson 2.17.2 features that were not available in Pulsar 3.3.9's bundled Jackson version.
 
-**Workaround Options:**
-1. Downgrade Debezium connector to an older version compatible with Jackson in Pulsar 3.3.9
-2. Upgrade Pulsar to a version with newer Jackson libraries
-3. Use custom class loading to isolate Jackson versions
+**Resolution:** This project has been upgraded to Pulsar 4.0.2, which includes Jackson 2.17.2+ and resolves the compatibility issue. The Debezium connector 3.3.2 now works without modifications.
 
-See `docs/troubleshooting.md` for more details.
+See `docs/troubleshooting.md` for more details on the original issue and resolution.
 
 ## Technology Stack
 
-- **Apache Pulsar**: 3.3.9
+- **Apache Pulsar**: 4.0.2
 - **Pulsar Helm Chart**: 4.4.0
 - **Kubernetes**: 1.29+ (tested on microk8s)
 - **Debezium**: 3.3.2 (Postgres connector)

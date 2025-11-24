@@ -5,7 +5,7 @@ Successfully deployed a PostgreSQL database with Debezium CDC connector that str
 
 ## Architecture
 - **PostgreSQL**: Running in `postgres` namespace using Debezium PostgreSQL image (version 16)
-- **Pulsar**: Running in `pulsar` namespace (version 3.3.9)
+- **Pulsar**: Running in `pulsar` namespace (version 4.0.2)
 - **Debezium Connector**: Pulsar Source Connector streaming changes from PostgreSQL to Pulsar
 
 ## Components Deployed
