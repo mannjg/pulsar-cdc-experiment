@@ -271,6 +271,20 @@ deploy_postgres() {
     fi
     
     wait_for_pods "app=postgres" "PostgreSQL" 600
+    
+    # Initialize database schema
+    print_info "Initializing PostgreSQL schema..."
+    local postgres_pod=$(kubectl get pod -n "$NAMESPACE" -l app=postgres -o jsonpath='{.items[0].metadata.name}')
+    
+    kubectl exec -n "$NAMESPACE" "$postgres_pod" -- psql -U postgres -d inventory -c "
+        CREATE TABLE IF NOT EXISTS customers (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            email VARCHAR(255) NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );" >/dev/null
+    
+    print_success "PostgreSQL schema initialized"
 }
 
 # Copy Debezium connector to broker

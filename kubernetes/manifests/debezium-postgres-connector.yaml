@@ -31,7 +31,7 @@ configs:
   snapshot.mode: "initial"
 
   # Publication configuration
-  publication.autocreate.mode: "filtered"
+  publication.autocreate.mode: "all_tables"
 
   # Schema change handling
   schema.history.internal.skip.unparseable.ddl: "true"
