@@ -46,6 +46,67 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Poll for pod readiness with detailed status reporting
+# Usage: wait_for_pods <label-selector> <component-name> <timeout-seconds>
+wait_for_pods() {
+    local label="$1"
+    local component="$2"
+    local timeout="${3:-600}"
+    local interval=5
+    local elapsed=0
+    
+    print_info "Waiting for $component (timeout: ${timeout}s)..."
+    
+    while [ $elapsed -lt $timeout ]; do
+        # Get pod status
+        local pod_status=$(kubectl get pods -n "$NAMESPACE" -l "$label" -o jsonpath='{range .items[*]}{.metadata.name}:{.status.phase}:{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null)
+        
+        if [ -z "$pod_status" ]; then
+            print_info "  No pods found yet for $component, waiting... (${elapsed}s/${timeout}s)"
+        else
+            local all_ready=true
+            local status_msg=""
+            
+            while IFS=: read -r pod_name phase ready_status; do
+                if [ -n "$pod_name" ]; then
+                    if [ "$phase" = "Running" ] && [ "$ready_status" = "True" ]; then
+                        status_msg="${status_msg}  ✓ $pod_name: Running and Ready\n"
+                    elif [ "$phase" = "Failed" ] || [ "$phase" = "CrashLoopBackOff" ]; then
+                        print_error "$component pod $pod_name is in $phase state"
+                        print_error "Check logs with: kubectl logs -n $NAMESPACE $pod_name"
+                        print_error "Check events with: kubectl describe pod -n $NAMESPACE $pod_name"
+                        exit 1
+                    else
+                        all_ready=false
+                        status_msg="${status_msg}  ⏳ $pod_name: Phase=$phase, Ready=$ready_status\n"
+                    fi
+                fi
+            done <<< "$pod_status"
+            
+            if [ "$all_ready" = true ]; then
+                print_success "$component is ready"
+                echo -e "$status_msg"
+                return 0
+            else
+                if [ $((elapsed % 15)) -eq 0 ]; then
+                    echo -e "$status_msg"
+                fi
+            fi
+        fi
+        
+        sleep $interval
+        elapsed=$((elapsed + interval))
+    done
+    
+    print_error "Timeout waiting for $component after ${timeout}s"
+    print_error "Current pod status:"
+    kubectl get pods -n "$NAMESPACE" -l "$label"
+    print_error ""
+    print_error "Recent events:"
+    kubectl get events -n "$NAMESPACE" --sort-by='.lastTimestamp' | tail -20
+    exit 1
+}
+
 # Check prerequisites
 check_prerequisites() {
     print_header "Checking Prerequisites"
@@ -182,25 +243,10 @@ install_pulsar() {
 wait_for_pulsar() {
     print_header "Waiting for Pulsar Pods to be Ready"
     
-    print_info "Waiting for ZooKeeper..."
-    kubectl wait --for=condition=ready pod -l component=zookeeper \
-        --namespace "$NAMESPACE" --timeout=300s
-    print_success "ZooKeeper is ready"
-    
-    print_info "Waiting for BookKeeper..."
-    kubectl wait --for=condition=ready pod -l component=bookkeeper \
-        --namespace "$NAMESPACE" --timeout=300s
-    print_success "BookKeeper is ready"
-    
-    print_info "Waiting for Broker..."
-    kubectl wait --for=condition=ready pod -l component=broker \
-        --namespace "$NAMESPACE" --timeout=300s
-    print_success "Broker is ready"
-    
-    print_info "Waiting for Proxy..."
-    kubectl wait --for=condition=ready pod -l component=proxy \
-        --namespace "$NAMESPACE" --timeout=300s
-    print_success "Proxy is ready"
+    wait_for_pods "component=zookeeper" "ZooKeeper" 600
+    wait_for_pods "component=bookie" "BookKeeper" 600
+    wait_for_pods "component=broker" "Broker" 600
+    wait_for_pods "component=proxy" "Proxy" 600
     
     print_success "All Pulsar components are ready"
 }
@@ -224,35 +270,44 @@ deploy_postgres() {
         print_success "PostgreSQL manifest applied"
     fi
     
-    print_info "Waiting for PostgreSQL to be ready..."
-    kubectl wait --for=condition=ready pod -l app=postgres \
-        --namespace "$NAMESPACE" --timeout=300s
-    
-    print_success "PostgreSQL is ready"
+    wait_for_pods "app=postgres" "PostgreSQL" 600
 }
 
 # Copy Debezium connector to broker
+# Once in /pulsar/connectors/, it becomes available via builtin://debezium-postgres
 copy_debezium_connector() {
     print_header "Copying Debezium Connector to Broker"
-    
+
     local connector_path="$PROJECT_ROOT/connectors/pulsar-io-debezium-postgres-3.3.2.nar"
     local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}')
-    
+
     if [ -z "$broker_pod" ]; then
         print_error "Could not find broker pod"
         exit 1
     fi
-    
+
     if [ ! -f "$connector_path" ]; then
         print_error "Debezium connector NAR not found at: $connector_path"
         exit 1
     fi
-    
+
     print_info "Copying connector to broker pod: $broker_pod"
     kubectl cp "$connector_path" \
         "$NAMESPACE/$broker_pod:/pulsar/connectors/pulsar-io-debezium-postgres-3.3.2.nar"
-    
+
     print_success "Debezium connector copied"
+
+    # Verify connector is available via builtin:// protocol
+    print_info "Verifying debezium-postgres connector is available..."
+    sleep 2  # Give Pulsar a moment to scan the connectors directory
+
+    if kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
+        curl -s http://localhost:8080/admin/v2/functions/connectors 2>/dev/null | grep -q "debezium-postgres"; then
+        print_success "✓ Connector verified and available via builtin://debezium-postgres"
+    else
+        print_warning "⚠ Connector not yet registered (may take a few seconds)"
+        print_info "You can verify later with: kubectl exec -n $NAMESPACE $broker_pod -- curl -s http://localhost:8080/admin/v2/functions/connectors"
+    fi
 }
 
 # Create Debezium source connector
@@ -290,9 +345,10 @@ create_debezium_connector() {
     
     print_success "Debezium connector created"
     
-    # Wait a bit for the connector pod to start
-    print_info "Waiting for connector pod to be created..."
-    sleep 10
+    # Wait for connector pod to be ready
+    print_info "Waiting for connector pod to be ready..."
+    sleep 5  # Give k8s a moment to schedule the pod
+    wait_for_pods "compute-type=source,tenant=public,namespace=default" "Debezium Connector" 600
 }
 
 # Deploy CDC enrichment function
@@ -352,9 +408,10 @@ deploy_cdc_function() {
     
     print_success "CDC enrichment function deployed"
     
-    # Wait for function pod to start
-    print_info "Waiting for function pod to be created..."
-    sleep 10
+    # Wait for function pod to be ready
+    print_info "Waiting for function pod to be ready..."
+    sleep 5  # Give k8s a moment to schedule the pod
+    wait_for_pods "compute-type=function,tenant=public,namespace=default" "CDC Enrichment Function" 600
 }
 
 # Display deployment status
