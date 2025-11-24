@@ -276,15 +276,15 @@ deploy_postgres() {
     print_info "Initializing PostgreSQL schema..."
     local postgres_pod=$(kubectl get pod -n "$NAMESPACE" -l app=postgres -o jsonpath='{.items[0].metadata.name}')
     
-    kubectl exec -n "$NAMESPACE" "$postgres_pod" -- psql -U postgres -d inventory -c "
-        CREATE TABLE IF NOT EXISTS customers (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            email VARCHAR(255) NOT NULL UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );" >/dev/null
+    # Wait a moment for PostgreSQL to be fully ready
+    sleep 5
     
-    print_success "PostgreSQL schema initialized"
+    # Create customers table (idempotent)
+    if kubectl exec -n "$NAMESPACE" "$postgres_pod" -- psql -U postgres -d inventory -c "CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL UNIQUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);" >/dev/null 2>&1; then
+        print_success "PostgreSQL schema initialized"
+    else
+        print_warning "PostgreSQL schema initialization failed, but continuing (table may already exist)"
+    fi
 }
 
 # Copy Debezium connector to broker
@@ -336,25 +336,21 @@ create_debezium_connector() {
         exit 1
     fi
     
+    # Copy config to broker first (needed for both create and update)
+    print_info "Copying connector configuration to broker..."
+    kubectl cp "$connector_config" \
+        "$NAMESPACE/$broker_pod:/pulsar/conf/debezium-postgres-connector.yaml"
+    
     # Check if connector already exists
     print_info "Checking if connector already exists..."
     if kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
         bin/pulsar-admin sources get --tenant public --namespace default --name debezium-postgres-source >/dev/null 2>&1; then
         print_info "Connector already exists, updating..."
-        kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
-            bin/pulsar-admin sources update \
-            --source-config-file /pulsar/conf/debezium-postgres-connector.yaml || true
+        kubectl exec -n "$NAMESPACE" "$broker_pod" -- bin/pulsar-admin sources update --source-config-file /pulsar/conf/debezium-postgres-connector.yaml || true
     else
-        # Copy config to broker
-        print_info "Copying connector configuration to broker..."
-        kubectl cp "$connector_config" \
-            "$NAMESPACE/$broker_pod:/pulsar/conf/debezium-postgres-connector.yaml"
-        
-        # Create the connector
+        # Create the connector (schema type configured in YAML)
         print_info "Creating Debezium connector..."
-        kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
-            bin/pulsar-admin sources create \
-            --source-config-file /pulsar/conf/debezium-postgres-connector.yaml
+        kubectl exec -n "$NAMESPACE" "$broker_pod" -- bin/pulsar-admin sources create --source-config-file /pulsar/conf/debezium-postgres-connector.yaml
     fi
     
     print_success "Debezium connector created"
@@ -363,6 +359,46 @@ create_debezium_connector() {
     print_info "Waiting for connector pod to be ready..."
     sleep 5  # Give k8s a moment to schedule the pod
     wait_for_pods "component=source,tenant=public,namespace=default" "Debezium Connector" 600
+}
+
+# Ensure CDC output topic exists with correct schema
+# Wait for the connector to initialize and create the topic naturally during snapshot
+ensure_cdc_topic_ready() {
+    print_header "Ensuring CDC Output Topic is Ready"
+
+    local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}')
+    local output_topic="persistent://public/default/dbserver1.public.customers"
+
+    # Don't insert test data - let the connector create the topic during its snapshot
+    # This ensures the topic is created with the connector's configured schema (JSON)
+    print_info "Waiting for Debezium connector to complete initial snapshot and create output topic..."
+    local max_attempts=30
+    local attempt=0
+
+    while [ $attempt -lt $max_attempts ]; do
+        # Check connector logs for successful initialization
+        local connector_pod=$(kubectl get pod -n "$NAMESPACE" -l component=source,name=debezium-postgres-source -o jsonpath='{.items[0].metadata.name}')
+        if [ -n "$connector_pod" ]; then
+            if kubectl logs -n "$NAMESPACE" "$connector_pod" --tail=100 2>/dev/null | grep -q "Processing messages"; then
+                # Check if topic was created
+                if kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
+                    bin/pulsar-admin topics list public/default 2>/dev/null | grep -q "dbserver1.public.customers"; then
+                    print_success "Output topic created: $output_topic"
+                    print_success "Debezium connector is processing messages"
+                    return 0
+                fi
+            fi
+        fi
+
+        attempt=$((attempt + 1))
+        if [ $((attempt % 5)) -eq 0 ]; then
+            print_info "Still waiting for connector initialization... (${attempt}/${max_attempts})"
+        fi
+        sleep 2
+    done
+
+    print_warning "Connector not fully initialized after ${max_attempts} attempts, but continuing..."
+    print_info "The connector will create the topic during snapshot or on first data change"
 }
 
 # Deploy CDC enrichment function
@@ -503,6 +539,7 @@ main() {
     deploy_postgres
     # copy_debezium_connector  # Not needed - using built-in connector
     create_debezium_connector
+    ensure_cdc_topic_ready
     deploy_cdc_function
     display_status
     display_next_steps
