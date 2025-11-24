@@ -484,7 +484,7 @@ main() {
     install_pulsar
     wait_for_pulsar
     deploy_postgres
-    copy_debezium_connector
+    # copy_debezium_connector  # Not needed - using built-in connector
     create_debezium_connector
     deploy_cdc_function
     display_status
