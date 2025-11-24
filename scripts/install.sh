@@ -343,7 +343,7 @@ create_debezium_connector() {
         print_info "Connector already exists, updating..."
         kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
             bin/pulsar-admin sources update \
-            --source-config-file /pulsar/conf/debezium-postgres-connector.yaml
+            --source-config-file /pulsar/conf/debezium-postgres-connector.yaml || true
     else
         # Copy config to broker
         print_info "Copying connector configuration to broker..."
@@ -362,14 +362,14 @@ create_debezium_connector() {
     # Wait for connector pod to be ready
     print_info "Waiting for connector pod to be ready..."
     sleep 5  # Give k8s a moment to schedule the pod
-    wait_for_pods "compute-type=source,tenant=public,namespace=default" "Debezium Connector" 600
+    wait_for_pods "component=source,tenant=public,namespace=default" "Debezium Connector" 600
 }
 
 # Deploy CDC enrichment function
 deploy_cdc_function() {
     print_header "Deploying CDC Enrichment Function"
     
-    local function_py="$PROJECT_ROOT/functions/cdc-enrichment/cdc-enrichment-function.py"
+    local function_py="$PROJECT_ROOT/functions/cdc-enrichment/cdc_enrichment_function.py"
     local runtime_config="$PROJECT_ROOT/functions/cdc-enrichment/custom-runtime-options.json"
     local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}')
     
@@ -386,9 +386,12 @@ deploy_cdc_function() {
     # Copy function files to broker
     print_info "Copying function files to broker..."
     kubectl cp "$function_py" \
-        "$NAMESPACE/$broker_pod:/pulsar/conf/cdc-enrichment-function.py"
+        "$NAMESPACE/$broker_pod:/pulsar/conf/cdc_enrichment_function.py"
     kubectl cp "$runtime_config" \
         "$NAMESPACE/$broker_pod:/pulsar/conf/custom-runtime-options.json"
+    
+    # Read custom runtime options
+    local runtime_opts='{"clusterName":"pulsar","jobNamespace":"pulsar","extractLabels":{"app":"cdc-enrichment-function","component":"function"},"statefulSetName":"cdc-enrichment"}'
     
     # Check if function already exists
     print_info "Checking if function already exists..."
@@ -397,27 +400,27 @@ deploy_cdc_function() {
         print_info "Function already exists, updating..."
         kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
             bin/pulsar-admin functions update \
-            --py /pulsar/conf/cdc-enrichment-function.py \
+            --py /pulsar/conf/cdc_enrichment_function.py \
             --classname cdc_enrichment_function.CDCEnrichmentFunction \
             --tenant public \
             --namespace default \
             --name cdc-enrichment \
             --inputs persistent://public/default/dbserver1.public.customers \
             --output persistent://public/default/dbserver1.public.customers-enriched \
-            --custom-runtime-options-file /pulsar/conf/custom-runtime-options.json
+            --custom-runtime-options "$runtime_opts" || true
     else
         # Create the function
         print_info "Creating CDC enrichment function..."
         kubectl exec -n "$NAMESPACE" "$broker_pod" -- \
             bin/pulsar-admin functions create \
-            --py /pulsar/conf/cdc-enrichment-function.py \
+            --py /pulsar/conf/cdc_enrichment_function.py \
             --classname cdc_enrichment_function.CDCEnrichmentFunction \
             --tenant public \
             --namespace default \
             --name cdc-enrichment \
             --inputs persistent://public/default/dbserver1.public.customers \
             --output persistent://public/default/dbserver1.public.customers-enriched \
-            --custom-runtime-options-file /pulsar/conf/custom-runtime-options.json
+            --custom-runtime-options "$runtime_opts"
     fi
     
     print_success "CDC enrichment function deployed"
@@ -425,7 +428,7 @@ deploy_cdc_function() {
     # Wait for function pod to be ready
     print_info "Waiting for function pod to be ready..."
     sleep 5  # Give k8s a moment to schedule the pod
-    wait_for_pods "compute-type=function,tenant=public,namespace=default" "CDC Enrichment Function" 600
+    wait_for_pods "component=function,tenant=public,namespace=default" "CDC Enrichment Function" 600
 }
 
 # Display deployment status
@@ -439,7 +442,7 @@ display_status() {
     kubectl get pods -n "$NAMESPACE" -l app=postgres
     
     echo -e "\n${BLUE}Debezium Connector:${NC}"
-    local connector_pod=$(kubectl get pods -n "$NAMESPACE" -l compute-type=source 2>/dev/null | grep debezium-postgres-source | awk '{print $1}' || echo "Not found yet")
+    local connector_pod=$(kubectl get pods -n "$NAMESPACE" -l component=source 2>/dev/null | grep debezium-postgres-source | awk '{print $1}' || echo "Not found yet")
     if [ "$connector_pod" != "Not found yet" ]; then
         kubectl get pod "$connector_pod" -n "$NAMESPACE"
     else
@@ -447,7 +450,7 @@ display_status() {
     fi
     
     echo -e "\n${BLUE}CDC Enrichment Function:${NC}"
-    local function_pod=$(kubectl get pods -n "$NAMESPACE" -l compute-type=function 2>/dev/null | grep cdc-enrichment | awk '{print $1}' || echo "Not found yet")
+    local function_pod=$(kubectl get pods -n "$NAMESPACE" -l component=function 2>/dev/null | grep cdc-enrichment | awk '{print $1}' || echo "Not found yet")
     if [ "$function_pod" != "Not found yet" ]; then
         kubectl get pod "$function_pod" -n "$NAMESPACE"
     else
