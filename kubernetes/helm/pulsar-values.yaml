@@ -64,7 +64,7 @@ broker:
     PF_functionRuntimeFactoryConfigs_pulsarRootDir: "/pulsar"
 
     # CRITICAL: Security customizer configuration (Pulsar 4.x property name)
-    PF_kubernetesManifestCustomizerClassName: "com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer"
+    PF_runtimeCustomizerClassName: "com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer"
 
     # Pod SecurityContext settings
     PF_runtimeCustomizerConfig_podSecurityContext_runAsNonRoot: "true"
