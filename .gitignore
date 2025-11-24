@@ -1,0 +1,68 @@
+# Java / Maven
+target/
+*.class
+*.jar
+!security-customizer/target/pulsar-security-customizer-1.0.0.jar
+*.war
+*.ear
+*.nar
+!connectors/pulsar-io-debezium-postgres-3.3.2.nar
+.mvn/
+mvnw
+mvnw.cmd
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Kubernetes
+*.log
+*.tmp
+
+# Sensitive data
+*.key
+*.pem
+*.crt
+secrets.yaml
+*-secret.yaml
+credentials/
+
+# Helm
+charts/
+Chart.lock
+
+# Temporary files
+.tmp/
+tmp/
+temp/

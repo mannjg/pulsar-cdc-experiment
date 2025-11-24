@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: pulsar
+  labels:
+    app: zookeeper
+spec:
+  ports:
+  - port: 2181
+    name: client
+    targetPort: 2181
+  - port: 2888
+    name: server
+    targetPort: 2888
+  - port: 3888
+    name: leader-election
+    targetPort: 3888
+  clusterIP: None
+  selector:
+    app: zookeeper
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: pulsar
+  labels:
+    app: zookeeper
+spec:
+  serviceName: zookeeper
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+      - name: zookeeper
+        image: apachepulsar/pulsar:3.3.9
+        command:
+        - sh
+        - -c
+        - >
+          bin/apply-config-from-env.py conf/zookeeper.conf &&
+          bin/generate-zookeeper-config.sh conf/zookeeper.conf &&
+          exec bin/pulsar zookeeper
+        ports:
+        - containerPort: 2181
+          name: client
+        - containerPort: 2888
+          name: server
+        - containerPort: 3888
+          name: leader-election
+        env:
+        - name: PULSAR_MEM
+          value: "-Xms512m -Xmx512m"
+        - name: PULSAR_GC
+          value: "-XX:+UseG1GC"
+        volumeMounts:
+        - name: datadir
+          mountPath: /pulsar/data
+  volumeClaimTemplates:
+  - metadata:
+      name: datadir
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 5Gi

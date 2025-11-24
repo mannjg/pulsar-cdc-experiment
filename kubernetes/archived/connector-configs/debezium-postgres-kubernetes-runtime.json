@@ -1,0 +1,30 @@
+{
+  "tenant": "public",
+  "namespace": "default",
+  "name": "debezium-postgres-source-k8s",
+  "topicName": "persistent://public/default/dbserver1.public.customers",
+  "archive": "/pulsar/download/pulsar-io-debezium-postgres-3.3.2.nar",
+  "parallelism": 1,
+  "customRuntimeOptions": "{\"jobNamespace\":\"pulsar\",\"extractLabels\":{\"app\":\"debezium-postgres-source\"}}",
+  "configs": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres.postgres.svc.cluster.local",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "postgres",
+    "database.dbname": "inventory",
+    "database.server.name": "dbserver1",
+    "table.include.list": "public.customers",
+    "slot.name": "debezium",
+    "plugin.name": "pgoutput",
+    "snapshot.mode": "initial",
+    "publication.autocreate.mode": "filtered",
+    "schema.history.internal.skip.unparseable.ddl": "true",
+    "time.precision.mode": "adaptive_time_microseconds",
+    "decimal.handling.mode": "double",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false"
+  }
+}

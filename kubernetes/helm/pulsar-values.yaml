@@ -1,0 +1,154 @@
+# Pulsar CDC Experiment - Complete Helm Values
+# This configuration includes the SecurityContext customizer for Kubernetes runtime
+# Chart version: pulsar-4.4.0
+# Pulsar version: 3.3.9
+
+# Initialize cluster on install
+initialize: true
+
+# Use specific image version for broker and functions
+image:
+  broker:
+    repository: apachepulsar/pulsar
+    tag: 3.3.9
+  function:
+    repository: apachepulsar/pulsar
+    tag: 3.3.9
+
+# Zookeeper configuration - minimal setup for local testing
+zookeeper:
+  replicaCount: 1
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 50m
+  configData:
+    PULSAR_MEM: "-Xms128m -Xmx256m"
+    PULSAR_GC: "-XX:+UseG1GC"
+  podMonitor:
+    enabled: false
+
+# BookKeeper configuration - minimal setup
+bookkeeper:
+  replicaCount: 1
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 50m
+  configData:
+    PULSAR_MEM: "-Xms256m -Xmx512m"
+    PULSAR_GC: "-XX:+UseG1GC"
+  podMonitor:
+    enabled: false
+
+# Broker configuration with Kubernetes runtime and SecurityContext customizer
+broker:
+  replicaCount: 1
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 50m
+  configData:
+    PULSAR_MEM: "-Xms256m -Xmx512m"
+    PULSAR_GC: "-XX:+UseG1GC"
+    managedLedgerDefaultEnsembleSize: "1"
+    managedLedgerDefaultWriteQuorum: "1"
+    managedLedgerDefaultAckQuorum: "1"
+    functionsWorkerEnabled: "true"
+
+    # Configure Kubernetes runtime for Functions Worker
+    PF_functionRuntimeFactoryClassName: "org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory"
+    PF_functionRuntimeFactoryConfigs_jobNamespace: "pulsar"
+    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:3.3.9"
+    PF_functionRuntimeFactoryConfigs_imagePullPolicy: "IfNotPresent"
+    PF_functionRuntimeFactoryConfigs_pulsarRootDir: "/pulsar"
+
+    # CRITICAL: Security customizer configuration
+    PF_runtimeCustomizerClassName: "com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer"
+
+    # Pod SecurityContext settings
+    PF_runtimeCustomizerConfig_podSecurityContext_runAsNonRoot: "true"
+    PF_runtimeCustomizerConfig_podSecurityContext_runAsUser: "10000"
+    PF_runtimeCustomizerConfig_podSecurityContext_runAsGroup: "10000"
+    PF_runtimeCustomizerConfig_podSecurityContext_fsGroup: "10000"
+
+    # Container SecurityContext settings
+    PF_runtimeCustomizerConfig_containerSecurityContext_runAsNonRoot: "true"
+    PF_runtimeCustomizerConfig_containerSecurityContext_readOnlyRootFilesystem: "false"
+    PF_runtimeCustomizerConfig_containerSecurityContext_allowPrivilegeEscalation: "false"
+    PF_runtimeCustomizerConfig_containerSecurityContext_capabilities_drop: "ALL"
+
+  # CRITICAL: Mount the security customizer JAR from ConfigMap
+  extraVolumes:
+  - name: security-customizer
+    configMap:
+      name: pulsar-security-customizer
+  extraVolumeMounts:
+  - name: security-customizer
+    mountPath: /pulsar/lib/pulsar-security-customizer-1.0.0.jar
+    subPath: pulsar-security-customizer-1.0.0.jar
+    readOnly: true
+
+  podMonitor:
+    enabled: false
+
+# Proxy configuration - minimal setup
+proxy:
+  replicaCount: 1
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 50m
+  configData:
+    PULSAR_MEM: "-Xms128m -Xmx256m"
+    PULSAR_GC: "-XX:+UseG1GC"
+  podMonitor:
+    enabled: false
+
+# Enable Pulsar Functions with runtime customization
+functions:
+  enabled: true
+  enableCustomizerRuntime: true
+  functionReplicaCount: 1
+  rbac:
+    limit_to_namespace: true
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 50m
+
+# Disable monitoring components not needed for basic testing
+pulsar_manager:
+  enabled: false
+
+grafana:
+  enabled: false
+
+prometheus:
+  enabled: false
+
+kube-prometheus-stack:
+  enabled: false
+
+victoria-metrics-k8s-stack:
+  enabled: false
+
+# Disable all PodMonitor resources
+monitoring:
+  podMonitor:
+    enabled: false
+
+# Disable recovery PodMonitor
+pulsar_metadata:
+  component: pulsar-init
+  podMonitor:
+    enabled: false
+
+# Volumes - use smaller sizes for testing
+volumes:
+  persistence: true
+  useSingleCommonVolume: true
+  journal:
+    size: 5Gi
+  ledgers:
+    size: 10Gi

@@ -1,0 +1,70 @@
+tenant: "public"
+namespace: "default"
+name: "debezium-postgres-source"
+topicName: "persistent://public/default/debezium-postgres-customers"
+archive: "file:///pulsar/connectors/pulsar-io-debezium-postgres-3.0.7.nar"
+parallelism: 1
+
+configs:
+  # Debezium connector class
+  connector.class: "io.debezium.connector.postgresql.PostgresConnector"
+
+  # Database connection
+  database.hostname: "postgres.pulsar.svc.cluster.local"
+  database.port: "5432"
+  database.user: "postgres"
+  database.password: "postgres"
+  database.dbname: "inventory"
+  database.server.name: "dbserver1"
+
+  # Schema and table filtering
+  table.include.list: "public.customers"
+
+  # Replication slot configuration
+  slot.name: "debezium"
+  plugin.name: "pgoutput"
+
+  # Offset storage (using Pulsar for offset tracking)
+  offset.storage: "org.apache.kafka.connect.storage.MemoryOffsetBackingStore"
+
+  # Snapshot mode
+  snapshot.mode: "initial"
+
+  # Publication configuration
+  publication.autocreate.mode: "filtered"
+
+  # Schema change handling
+  schema.history.internal.skip.unparseable.ddl: "true"
+
+  # Time precision
+  time.precision.mode: "adaptive_time_microseconds"
+
+  # Decimal handling
+  decimal.handling.mode: "double"
+
+  # Key and value converters
+  key.converter: "org.apache.kafka.connect.json.JsonConverter"
+  value.converter: "org.apache.kafka.connect.json.JsonConverter"
+  key.converter.schemas.enable: "false"
+  value.converter.schemas.enable: "false"
+
+# Kubernetes runtime configuration for StatefulSet deployment
+customRuntimeOptions: |
+  {
+    "clusterName": "pulsar",
+    "jobNamespace": "pulsar",
+    "extractLabels": {
+      "app": "debezium-postgres-source",
+      "component": "source-connector"
+    },
+    "statefulSetName": "debezium-postgres-source"
+  }
+
+# Resource specifications
+resources:
+  requests:
+    cpu: "0.5"
+    memory: "1Gi"
+  limits:
+    cpu: "1"
+    memory: "2Gi"

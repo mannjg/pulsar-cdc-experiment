@@ -1,0 +1,105 @@
+# Enable Kubernetes runtime for Pulsar Functions/Connectors
+broker:
+  configData:
+    PULSAR_MEM: -Xms256m -Xmx512m
+    PULSAR_GC: -XX:+UseG1GC
+    functionsWorkerEnabled: "true"
+    managedLedgerDefaultAckQuorum: "1"
+    managedLedgerDefaultEnsembleSize: "1"
+    managedLedgerDefaultWriteQuorum: "1"
+    
+    # Configure Kubernetes runtime for Functions Worker
+    PF_functionRuntimeFactoryClassName: "org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory"
+    PF_functionRuntimeFactoryConfigs_jobNamespace: "pulsar"
+    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:3.3.9"
+    PF_functionRuntimeFactoryConfigs_imagePullPolicy: "IfNotPresent"
+    PF_functionRuntimeFactoryConfigs_pulsarRootDir: "/pulsar"
+    
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+
+# Ensure RBAC is configured for Kubernetes runtime
+functions:
+  enableCustomizerRuntime: true
+  enabled: true
+  functionReplicaCount: 1
+  rbac:
+    limit_to_namespace: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+
+# Keep other existing settings
+bookkeeper:
+  replicaCount: 1
+  configData:
+    PULSAR_MEM: -Xms256m -Xmx512m
+    PULSAR_GC: -XX:+UseG1GC
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+  podMonitor:
+    enabled: false
+
+zookeeper:
+  replicaCount: 1
+  configData:
+    PULSAR_MEM: -Xms128m -Xmx256m
+    PULSAR_GC: -XX:+UseG1GC
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  podMonitor:
+    enabled: false
+
+proxy:
+  replicaCount: 1
+  configData:
+    PULSAR_MEM: -Xms128m -Xmx256m
+    PULSAR_GC: -XX:+UseG1GC
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  podMonitor:
+    enabled: false
+
+image:
+  broker:
+    repository: apachepulsar/pulsar
+    tag: 3.3.9
+  function:
+    repository: apachepulsar/pulsar
+    tag: 3.3.9
+
+volumes:
+  persistence: true
+  useSingleCommonVolume: true
+  journal:
+    size: 5Gi
+  ledgers:
+    size: 10Gi
+
+initialize: true
+
+# Disable monitoring components
+grafana:
+  enabled: false
+prometheus:
+  enabled: false
+kube-prometheus-stack:
+  enabled: false
+pulsar_manager:
+  enabled: false
+monitoring:
+  podMonitor:
+    enabled: false
+pulsar_metadata:
+  component: pulsar-init
+  podMonitor:
+    enabled: false

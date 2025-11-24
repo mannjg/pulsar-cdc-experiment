@@ -1,0 +1,91 @@
+USER-SUPPLIED VALUES: null
+bookkeeper:
+  configData:
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms256m -Xmx512m
+  podMonitor:
+    enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+broker:
+  configData:
+    PF_functionRuntimeFactoryClassName: org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory
+    PF_functionRuntimeFactoryConfigs_imagePullPolicy: IfNotPresent
+    PF_functionRuntimeFactoryConfigs_jobNamespace: pulsar
+    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: apachepulsar/pulsar:3.3.9
+    PF_functionRuntimeFactoryConfigs_pulsarRootDir: /pulsar
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms256m -Xmx512m
+    functionsWorkerEnabled: "true"
+    managedLedgerDefaultAckQuorum: "1"
+    managedLedgerDefaultEnsembleSize: "1"
+    managedLedgerDefaultWriteQuorum: "1"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+functions:
+  enableCustomizerRuntime: true
+  enabled: true
+  functionReplicaCount: 1
+  rbac:
+    limit_to_namespace: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+grafana:
+  enabled: false
+image:
+  broker:
+    repository: apachepulsar/pulsar
+    tag: 3.3.9
+  function:
+    repository: apachepulsar/pulsar
+    tag: 3.3.9
+initialize: true
+kube-prometheus-stack:
+  enabled: false
+monitoring:
+  podMonitor:
+    enabled: false
+prometheus:
+  enabled: false
+proxy:
+  configData:
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms128m -Xmx256m
+  podMonitor:
+    enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+pulsar_manager:
+  enabled: false
+pulsar_metadata:
+  component: pulsar-init
+  podMonitor:
+    enabled: false
+volumes:
+  journal:
+    size: 5Gi
+  ledgers:
+    size: 10Gi
+  persistence: true
+  useSingleCommonVolume: true
+zookeeper:
+  configData:
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms128m -Xmx256m
+  podMonitor:
+    enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi

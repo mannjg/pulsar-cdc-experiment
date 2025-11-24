@@ -1,0 +1,38 @@
+# Minimal Helm values patch to enable SecurityContext customizer
+# This only updates broker configuration without changing other settings
+
+broker:
+  configData:
+    # Configure custom manifest customizer
+    PF_kubernetesManifestCustomizerClassName: com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer
+
+    # Optional: Global security context defaults
+    PF_kubernetesManifestCustomizerConfig: |
+      {
+        "podSecurityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 10000,
+          "runAsGroup": 10000,
+          "fsGroup": 10000
+        },
+        "containerSecurityContext": {
+          "runAsNonRoot": true,
+          "readOnlyRootFilesystem": false,
+          "allowPrivilegeEscalation": false,
+          "capabilities": {
+            "drop": ["ALL"]
+          }
+        }
+      }
+
+  # Mount the customizer JAR from ConfigMap
+  volumes:
+    - name: security-customizer
+      configMap:
+        name: pulsar-security-customizer
+
+  volumeMounts:
+    - name: security-customizer
+      mountPath: /pulsar/lib/pulsar-security-customizer-1.0.0.jar
+      subPath: pulsar-security-customizer-1.0.0.jar
+      readOnly: true

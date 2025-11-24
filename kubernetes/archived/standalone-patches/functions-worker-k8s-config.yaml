@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: functions-worker-config
+  namespace: pulsar
+data:
+  functions_worker.yml: |
+    workerId: c-local-fw-broker-0.broker.pulsar.svc.cluster.local-8080
+    workerHostname: broker-0.broker.pulsar.svc.cluster.local
+    workerPort: 6750
+    workerPortTls: 6751
+
+    configurationMetadataStoreUrl: zk:zookeeper:2181
+
+    # Function package management
+    numFunctionPackageReplicas: 1
+    downloadDirectory: download/pulsar_functions
+
+    # Pulsar client config
+    useTls: false
+    pulsarServiceUrl: pulsar://broker-0.broker.pulsar.svc.cluster.local:6650
+    pulsarWebServiceUrl: http://broker-0.broker.pulsar.svc.cluster.local:8080
+
+    # Function metadata topics
+    pulsarFunctionsNamespace: public/functions
+    pulsarFunctionsCluster: local
+    functionMetadataTopicName: metadata
+    clusterCoordinationTopicName: coordinate
+
+    # Scheduler
+    schedulerClassName: "org.apache.pulsar.functions.worker.scheduler.RoundRobinScheduler"
+    functionAssignmentTopicName: "assignments"
+    failureCheckFreqMs: 30000
+    rescheduleTimeoutMs: 60000
+    initialBrokerReconnectMaxRetries: 60
+    assignmentWriteMaxRetries: 60
+    instanceLivenessCheckFreqMs: 30000
+
+    # Kubernetes Runtime Configuration
+    functionRuntimeFactoryClassName: org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory
+    functionRuntimeFactoryConfigs:
+      jobNamespace: pulsar
+      pulsarDockerImageName: apachepulsar/pulsar:3.3.9
+      imagePullPolicy: IfNotPresent
+      pulsarRootDir: /pulsar
+      submittingInsidePod: true
+      installUserCodeDependencies: true
+      pythonDependencyRepository: ""
+      pythonExtraDependencyRepository: ""
+      expectedMetricsCollectionInterval: 30
+      cpuOverCommitRatio: 1.0
+      memoryOverCommitRatio: 1.0
+      grpcPort: 9093
+      metricsPort: 9094
+      percentMemoryPadding: 10
+      gracePeriodSeconds: 5
+
+    # Runtime customizer for adding labels/annotations
+    runtimeCustomizerClassName: "org.apache.pulsar.functions.runtime.kubernetes.KubernetesManifestCustomizer"
+    runtimeCustomizerConfig:
+      jobNamespace: pulsar
+
+    # Minimum resources
+    functionInstanceMinResources:
+      cpu: 0.1
+      ram: 134217728
+      disk: 1073741824
+
+    # Security
+    authenticationEnabled: false
+    authorizationEnabled: false
+    tlsEnabled: false
+
+    # Connectors
+    connectorsDirectory: ./connectors
+    enableReferencingConnectorDirectoryFiles: true
+    functionsDirectory: ./functions
+    enableReferencingFunctionsDirectoryFiles: true

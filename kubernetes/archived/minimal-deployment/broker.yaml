@@ -1,0 +1,123 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: broker-config
+  namespace: pulsar
+data:
+  PULSAR_MEM: "-Xms512m -Xmx512m -XX:MaxDirectMemorySize=512m"
+  PULSAR_GC: "-XX:+UseG1GC"
+  metadataStoreUrl: "zk:zookeeper:2181"
+  configurationMetadataStoreUrl: "zk:zookeeper:2181"
+  clusterName: "local"
+  managedLedgerDefaultEnsembleSize: "1"
+  managedLedgerDefaultWriteQuorum: "1"
+  managedLedgerDefaultAckQuorum: "1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broker
+  namespace: pulsar
+  labels:
+    app: broker
+spec:
+  ports:
+  - port: 6650
+    name: pulsar
+    targetPort: 6650
+  - port: 8080
+    name: http
+    targetPort: 8080
+  clusterIP: None
+  selector:
+    app: broker
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broker-external
+  namespace: pulsar
+  labels:
+    app: broker
+spec:
+  type: NodePort
+  ports:
+  - port: 6650
+    name: pulsar
+    targetPort: 6650
+    nodePort: 30650
+  - port: 8080
+    name: http
+    targetPort: 8080
+    nodePort: 30080
+  selector:
+    app: broker
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: broker
+  namespace: pulsar
+  labels:
+    app: broker
+spec:
+  serviceName: broker
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broker
+  template:
+    metadata:
+      labels:
+        app: broker
+    spec:
+      initContainers:
+      - name: wait-zookeeper
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - >
+          until nslookup zookeeper.pulsar.svc.cluster.local; do
+            echo waiting for zookeeper;
+            sleep 2;
+          done
+      - name: wait-bookkeeper
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - >
+          until nslookup bookkeeper.pulsar.svc.cluster.local; do
+            echo waiting for bookkeeper;
+            sleep 2;
+          done
+      containers:
+      - name: broker
+        image: apachepulsar/pulsar:3.3.9
+        command:
+        - sh
+        - -c
+        - >
+          bin/apply-config-from-env.py conf/broker.conf &&
+          exec bin/pulsar broker
+        ports:
+        - containerPort: 6650
+          name: pulsar
+        - containerPort: 8080
+          name: http
+        envFrom:
+        - configMapRef:
+            name: broker-config
+        livenessProbe:
+          httpGet:
+            path: /admin/v2/brokers/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /admin/v2/brokers/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10

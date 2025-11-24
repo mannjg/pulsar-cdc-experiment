@@ -1,0 +1,137 @@
+# Complete Helm values with security customizer enabled
+# Disables VictoriaMetrics components that were causing issues
+
+# Explicitly disable VictoriaMetrics
+victoria-metrics-k8s-stack:
+  enabled: false
+
+bookkeeper:
+  configData:
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms256m -Xmx512m
+  podMonitor:
+    enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+
+broker:
+  configData:
+    # Functions worker and runtime configuration
+    functionsWorkerEnabled: "true"
+    PF_functionRuntimeFactoryClassName: org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory
+    PF_functionRuntimeFactoryConfigs_imagePullPolicy: IfNotPresent
+    PF_functionRuntimeFactoryConfigs_jobNamespace: pulsar
+    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: apachepulsar/pulsar:3.3.9
+    PF_functionRuntimeFactoryConfigs_pulsarRootDir: /pulsar
+
+    # Security customizer configuration - at WorkerConfig level, NOT functionRuntimeFactoryConfigs
+    PF_runtimeCustomizerClassName: com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer
+    PF_runtimeCustomizerConfig_podSecurityContext_runAsNonRoot: "true"
+    PF_runtimeCustomizerConfig_podSecurityContext_runAsUser: "10000"
+    PF_runtimeCustomizerConfig_podSecurityContext_runAsGroup: "10000"
+    PF_runtimeCustomizerConfig_podSecurityContext_fsGroup: "10000"
+    PF_runtimeCustomizerConfig_containerSecurityContext_runAsNonRoot: "true"
+    PF_runtimeCustomizerConfig_containerSecurityContext_readOnlyRootFilesystem: "false"
+    PF_runtimeCustomizerConfig_containerSecurityContext_allowPrivilegeEscalation: "false"
+    PF_runtimeCustomizerConfig_containerSecurityContext_capabilities_drop: "ALL"
+
+    # Other broker configuration
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms256m -Xmx512m
+    managedLedgerDefaultAckQuorum: "1"
+    managedLedgerDefaultEnsembleSize: "1"
+    managedLedgerDefaultWriteQuorum: "1"
+
+  # Mount the customizer JAR from ConfigMap using extraVolumes/extraVolumeMounts
+  extraVolumes:
+    - name: security-customizer
+      configMap:
+        name: pulsar-security-customizer
+
+  extraVolumeMounts:
+    - name: security-customizer
+      mountPath: /pulsar/lib/pulsar-security-customizer-1.0.0.jar
+      subPath: pulsar-security-customizer-1.0.0.jar
+      readOnly: true
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+
+functions:
+  enableCustomizerRuntime: true
+  enabled: true
+  functionReplicaCount: 1
+  rbac:
+    limit_to_namespace: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+
+grafana:
+  enabled: false
+
+image:
+  broker:
+    repository: apachepulsar/pulsar
+    tag: 3.3.9
+  function:
+    repository: apachepulsar/pulsar
+    tag: 3.3.9
+
+initialize: true
+
+kube-prometheus-stack:
+  enabled: false
+
+monitoring:
+  podMonitor:
+    enabled: false
+
+prometheus:
+  enabled: false
+
+proxy:
+  configData:
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms128m -Xmx256m
+  podMonitor:
+    enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+pulsar_manager:
+  enabled: false
+
+pulsar_metadata:
+  component: pulsar-init
+  podMonitor:
+    enabled: false
+
+volumes:
+  journal:
+    size: 5Gi
+  ledgers:
+    size: 10Gi
+  persistence: true
+  useSingleCommonVolume: true
+
+zookeeper:
+  configData:
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms128m -Xmx256m
+  podMonitor:
+    enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi

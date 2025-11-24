@@ -1,0 +1,404 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pulsar
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: functions-worker
+  namespace: pulsar
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: functions-worker
+  namespace: pulsar
+rules:
+- apiGroups: [""]
+  resources: ["services", "configmaps", "pods", "pods/log"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: functions-worker
+  namespace: pulsar
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: functions-worker
+subjects:
+- kind: ServiceAccount
+  name: functions-worker
+  namespace: pulsar
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zookeeper-config
+  namespace: pulsar
+data:
+  PULSAR_MEM: "-Xms256m -Xmx256m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: pulsar
+spec:
+  clusterIP: None
+  ports:
+  - port: 2181
+    name: client
+  - port: 2888
+    name: server
+  - port: 3888
+    name: leader-election
+  selector:
+    app: zookeeper
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: pulsar
+spec:
+  serviceName: zookeeper
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+      - name: zookeeper
+        image: apachepulsar/pulsar:3.3.9
+        command: ["sh", "-c"]
+        args:
+        - >
+          bin/apply-config-from-env.py conf/zookeeper.conf &&
+          bin/generate-zookeeper-config.sh conf/zookeeper.conf &&
+          exec bin/pulsar zookeeper
+        ports:
+        - containerPort: 2181
+          name: client
+        - containerPort: 2888
+          name: server
+        - containerPort: 3888
+          name: leader-election
+        envFrom:
+        - configMapRef:
+            name: zookeeper-config
+        volumeMounts:
+        - name: datadir
+          mountPath: /pulsar/data
+  volumeClaimTemplates:
+  - metadata:
+      name: datadir
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pulsar-init
+  namespace: pulsar
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-zookeeper
+        image: busybox:1.36
+        command: ["sh", "-c", "until nslookup zookeeper.pulsar.svc.cluster.local; do echo waiting for zookeeper; sleep 2; done"]
+      containers:
+      - name: pulsar-init
+        image: apachepulsar/pulsar:3.3.9
+        command: ["sh", "-c"]
+        args:
+        - >
+          bin/pulsar initialize-cluster-metadata \
+            --cluster local \
+            --zookeeper zookeeper:2181 \
+            --configuration-store zookeeper:2181 \
+            --web-service-url http://broker:8080 \
+            --broker-service-url pulsar://broker:6650
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bookkeeper-config
+  namespace: pulsar
+data:
+  PULSAR_MEM: "-Xms512m -Xmx512m -XX:MaxDirectMemorySize=512m"
+  PULSAR_GC: "-XX:+UseG1GC"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bookkeeper
+  namespace: pulsar
+spec:
+  clusterIP: None
+  ports:
+  - port: 3181
+    name: client
+  selector:
+    app: bookkeeper
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bookkeeper
+  namespace: pulsar
+spec:
+  serviceName: bookkeeper
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bookkeeper
+  template:
+    metadata:
+      labels:
+        app: bookkeeper
+    spec:
+      initContainers:
+      - name: wait-zookeeper
+        image: busybox:1.36
+        command: ["sh", "-c", "until nslookup zookeeper.pulsar.svc.cluster.local; do echo waiting for zookeeper; sleep 2; done"]
+      containers:
+      - name: bookkeeper
+        image: apachepulsar/pulsar:3.3.9
+        command: ["sh", "-c"]
+        args:
+        - >
+          bin/apply-config-from-env.py conf/bookkeeper.conf &&
+          exec bin/pulsar bookie
+        ports:
+        - containerPort: 3181
+          name: client
+        envFrom:
+        - configMapRef:
+            name: bookkeeper-config
+        env:
+        - name: zkServers
+          value: zookeeper:2181
+        volumeMounts:
+        - name: journal
+          mountPath: /pulsar/data/bookkeeper/journal
+        - name: ledgers
+          mountPath: /pulsar/data/bookkeeper/ledgers
+  volumeClaimTemplates:
+  - metadata:
+      name: journal
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+  - metadata:
+      name: ledgers
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bookkeeper-init
+  namespace: pulsar
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: bookkeeper-init
+        image: apachepulsar/pulsar:3.3.9
+        command: ["sh", "-c"]
+        args:
+        - >
+          until bin/bookkeeper shell whatisinstanceid; do
+            echo "Waiting for bookkeeper to be ready";
+            sleep 3;
+          done &&
+          bin/bookkeeper shell metaformat -nonInteractive || true &&
+          bin/bookkeeper shell bookieformat -nonInteractive -force || true
+        env:
+        - name: zkServers
+          value: zookeeper:2181
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: broker-config
+  namespace: pulsar
+data:
+  PULSAR_MEM: "-Xms512m -Xmx512m -XX:MaxDirectMemorySize=512m"
+  PULSAR_GC: "-XX:+UseG1GC"
+  clusterName: "local"
+  metadataStoreUrl: "zk:zookeeper:2181"
+  configurationMetadataStoreUrl: "zk:zookeeper:2181"
+  managedLedgerDefaultEnsembleSize: "1"
+  managedLedgerDefaultWriteQuorum: "1"
+  managedLedgerDefaultAckQuorum: "1"
+  functionsWorkerEnabled: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: functions-worker-config
+  namespace: pulsar
+data:
+  functions_worker.yml: |
+    workerId: c-local-fw-broker-0.broker.pulsar.svc.cluster.local-8080
+    workerHostname: broker-0.broker.pulsar.svc.cluster.local
+    workerPort: 6750
+
+    configurationMetadataStoreUrl: zk:zookeeper:2181
+
+    pulsarServiceUrl: pulsar://broker-0.broker.pulsar.svc.cluster.local:6650
+    pulsarWebServiceUrl: http://broker-0.broker.pulsar.svc.cluster.local:8080
+
+    pulsarFunctionsNamespace: public/functions
+    pulsarFunctionsCluster: local
+
+    numFunctionPackageReplicas: 1
+    downloadDirectory: download/pulsar_functions
+
+    functionRuntimeFactoryClassName: org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory
+    functionRuntimeFactoryConfigs:
+      jobNamespace: pulsar
+      pulsarDockerImageName: apachepulsar/pulsar:3.3.9
+      imagePullPolicy: IfNotPresent
+      pulsarRootDir: /pulsar
+      submittingInsidePod: true
+      cpuOverCommitRatio: 1.0
+      memoryOverCommitRatio: 1.0
+      grpcPort: 9093
+      metricsPort: 9094
+      percentMemoryPadding: 10
+
+    functionInstanceMinResources:
+      cpu: 0.1
+      ram: 134217728
+      disk: 1073741824
+
+    schedulerClassName: "org.apache.pulsar.functions.worker.scheduler.RoundRobinScheduler"
+    functionAssignmentTopicName: "assignments"
+    failureCheckFreqMs: 30000
+    rescheduleTimeoutMs: 60000
+    instanceLivenessCheckFreqMs: 30000
+
+    authenticationEnabled: false
+    authorizationEnabled: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broker
+  namespace: pulsar
+spec:
+  clusterIP: None
+  ports:
+  - port: 6650
+    name: pulsar
+  - port: 8080
+    name: http
+  selector:
+    app: broker
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broker-external
+  namespace: pulsar
+spec:
+  type: NodePort
+  ports:
+  - port: 6650
+    nodePort: 30650
+    name: pulsar
+  - port: 8080
+    nodePort: 30080
+    name: http
+  selector:
+    app: broker
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: broker
+  namespace: pulsar
+  labels:
+    app: broker
+spec:
+  serviceName: broker
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broker
+  template:
+    metadata:
+      labels:
+        app: broker
+    spec:
+      serviceAccountName: functions-worker
+      initContainers:
+      - name: wait-zookeeper
+        image: busybox:1.36
+        command: ["sh", "-c", "until nslookup zookeeper.pulsar.svc.cluster.local; do echo waiting for zookeeper; sleep 2; done"]
+      - name: wait-bookkeeper
+        image: busybox:1.36
+        command: ["sh", "-c", "until nslookup bookkeeper.pulsar.svc.cluster.local; do echo waiting for bookkeeper; sleep 2; done"]
+      containers:
+      - name: broker
+        image: apachepulsar/pulsar:3.3.9
+        command: ["sh", "-c"]
+        args:
+        - >
+          bin/apply-config-from-env.py conf/broker.conf &&
+          exec bin/pulsar broker
+        ports:
+        - containerPort: 6650
+          name: pulsar
+        - containerPort: 8080
+          name: http
+        envFrom:
+        - configMapRef:
+            name: broker-config
+        volumeMounts:
+        - name: functions-worker-config
+          mountPath: /pulsar/conf/functions_worker.yml
+          subPath: functions_worker.yml
+        livenessProbe:
+          httpGet:
+            path: /admin/v2/brokers/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /admin/v2/brokers/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: functions-worker-config
+        configMap:
+          name: functions-worker-config

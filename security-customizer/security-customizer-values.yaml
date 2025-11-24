@@ -1,0 +1,70 @@
+# Helm values to enable SecurityContext customizer for Pulsar Functions and Connectors
+# This adds the custom KubernetesManifestCustomizer JAR and configuration
+
+broker:
+  configData:
+    # Enable Kubernetes runtime (already configured)
+    functionsWorkerEnabled: "true"
+    PF_functionRuntimeFactoryClassName: org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory
+
+    # Configure custom manifest customizer
+    PF_kubernetesManifestCustomizerClassName: com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer
+
+    # Optional: Global security context defaults
+    # These will be applied to all Functions/Connectors unless overridden by customRuntimeOptions
+    PF_kubernetesManifestCustomizerConfig: |
+      {
+        "podSecurityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 10000,
+          "runAsGroup": 10000,
+          "fsGroup": 10000
+        },
+        "containerSecurityContext": {
+          "runAsNonRoot": true,
+          "readOnlyRootFilesystem": false,
+          "allowPrivilegeEscalation": false,
+          "capabilities": {
+            "drop": ["ALL"]
+          }
+        }
+      }
+
+    # Existing function runtime configurations
+    PF_functionRuntimeFactoryConfigs_imagePullPolicy: IfNotPresent
+    PF_functionRuntimeFactoryConfigs_jobNamespace: pulsar
+    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: apachepulsar/pulsar:3.3.9
+    PF_functionRuntimeFactoryConfigs_pulsarRootDir: /pulsar
+    PULSAR_GC: -XX:+UseG1GC
+    PULSAR_MEM: -Xms256m -Xmx512m
+    managedLedgerDefaultAckQuorum: "1"
+    managedLedgerDefaultEnsembleSize: "1"
+    managedLedgerDefaultWriteQuorum: "1"
+
+  # Mount the customizer JAR from ConfigMap
+  volumes:
+    - name: security-customizer
+      configMap:
+        name: pulsar-security-customizer
+
+  volumeMounts:
+    - name: security-customizer
+      mountPath: /pulsar/lib/pulsar-security-customizer-1.0.0.jar
+      subPath: pulsar-security-customizer-1.0.0.jar
+      readOnly: true
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+
+functions:
+  enableCustomizerRuntime: true
+  enabled: true
+  functionReplicaCount: 1
+  rbac:
+    limit_to_namespace: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi

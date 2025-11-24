@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "volumes": [
+          {
+            "name": "security-customizer",
+            "configMap": {
+              "name": "pulsar-security-customizer"
+            }
+          }
+        ],
+        "containers": [
+          {
+            "name": "pulsar-broker",
+            "env": [
+              {
+                "name": "PF_kubernetesManifestCustomizerClassName",
+                "value": "com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer"
+              },
+              {
+                "name": "PF_kubernetesManifestCustomizerConfig",
+                "value": "{\"podSecurityContext\":{\"runAsNonRoot\":true,\"runAsUser\":10000,\"runAsGroup\":10000,\"fsGroup\":10000},\"containerSecurityContext\":{\"runAsNonRoot\":true,\"readOnlyRootFilesystem\":false,\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]}}}"
+              }
+            ],
+            "volumeMounts": [
+              {
+                "name": "security-customizer",
+                "mountPath": "/pulsar/lib/pulsar-security-customizer-1.0.0.jar",
+                "subPath": "pulsar-security-customizer-1.0.0.jar",
+                "readOnly": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

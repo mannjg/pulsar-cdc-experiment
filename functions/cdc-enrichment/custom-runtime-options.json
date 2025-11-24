@@ -1,0 +1,9 @@
+{
+  "clusterName": "pulsar",
+  "jobNamespace": "pulsar",
+  "extractLabels": {
+    "app": "cdc-enrichment-function",
+    "component": "function"
+  },
+  "statefulSetName": "cdc-enrichment"
+}

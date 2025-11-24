@@ -1,0 +1,14 @@
+spec:
+  template:
+    spec:
+      serviceAccountName: functions-worker
+      containers:
+      - name: broker
+        volumeMounts:
+        - name: functions-worker-config
+          mountPath: /pulsar/conf/functions_worker.yml
+          subPath: functions_worker.yml
+      volumes:
+      - name: functions-worker-config
+        configMap:
+          name: functions-worker-config
