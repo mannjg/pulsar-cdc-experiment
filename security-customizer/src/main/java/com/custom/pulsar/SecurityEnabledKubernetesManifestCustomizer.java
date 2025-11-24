@@ -22,7 +22,9 @@ import java.util.*;
 public class SecurityEnabledKubernetesManifestCustomizer extends BasicKubernetesManifestCustomizer {
 
     private static final Logger log = LoggerFactory.getLogger(SecurityEnabledKubernetesManifestCustomizer.class);
-    private static final Gson gson = new Gson();
+    private static final Gson gson = new com.google.gson.GsonBuilder()
+            .registerTypeAdapter(CapabilitiesOpts.class, new CapabilitiesDeserializer())
+            .create();
 
     private SecurityRuntimeOpts globalSecurityOpts;
 
@@ -328,5 +330,65 @@ public class SecurityEnabledKubernetesManifestCustomizer extends BasicKubernetes
         public String role;
         public String type;
         public String user;
+    }
+
+    /**
+     * Custom deserializer for CapabilitiesOpts that handles multiple input formats:
+     * 1. Map format from Pulsar indexed properties: {0: "ALL"} -> ["ALL"]
+     * 2. Proper array format: ["ALL", "NET_ADMIN"] -> ["ALL", "NET_ADMIN"]
+     * 3. Single string value: "ALL" -> ["ALL"]
+     */
+    private static class CapabilitiesDeserializer implements com.google.gson.JsonDeserializer<CapabilitiesOpts> {
+        @Override
+        public CapabilitiesOpts deserialize(com.google.gson.JsonElement json, Type typeOfT,
+                                            com.google.gson.JsonDeserializationContext context)
+                throws com.google.gson.JsonParseException {
+            CapabilitiesOpts caps = new CapabilitiesOpts();
+
+            if (json.isJsonObject()) {
+                com.google.gson.JsonObject obj = json.getAsJsonObject();
+
+                // Handle 'add' field
+                if (obj.has("add")) {
+                    caps.add = parseField(obj.get("add"));
+                }
+
+                // Handle 'drop' field
+                if (obj.has("drop")) {
+                    caps.drop = parseField(obj.get("drop"));
+                }
+            }
+
+            return caps;
+        }
+
+        private List<String> parseField(com.google.gson.JsonElement element) {
+            if (element.isJsonArray()) {
+                // Proper array format: ["ALL", "NET_ADMIN"]
+                List<String> result = new ArrayList<>();
+                for (com.google.gson.JsonElement item : element.getAsJsonArray()) {
+                    result.add(item.getAsString());
+                }
+                return result;
+            } else if (element.isJsonObject()) {
+                // Map format from Pulsar indexed properties: {0: "ALL", 1: "NET_ADMIN"}
+                // Extract values sorted by numeric keys
+                com.google.gson.JsonObject obj = element.getAsJsonObject();
+                java.util.TreeMap<Integer, String> sortedMap = new java.util.TreeMap<>();
+                for (Map.Entry<String, com.google.gson.JsonElement> entry : obj.entrySet()) {
+                    try {
+                        int index = Integer.parseInt(entry.getKey());
+                        sortedMap.put(index, entry.getValue().getAsString());
+                    } catch (NumberFormatException e) {
+                        log.warn("Ignoring non-numeric key in capabilities: {}", entry.getKey());
+                    }
+                }
+                return new ArrayList<>(sortedMap.values());
+            } else if (element.isJsonPrimitive()) {
+                // Single string value: "ALL"
+                return Collections.singletonList(element.getAsString());
+            }
+            return Collections.emptyList();
+        }
     }
 }

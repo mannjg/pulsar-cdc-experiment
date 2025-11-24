@@ -74,9 +74,10 @@ broker:
 
     # Container SecurityContext settings
     PF_runtimeCustomizerConfig_containerSecurityContext_runAsNonRoot: "true"
+    PF_runtimeCustomizerConfig_containerSecurityContext_runAsUser: "10000"
     PF_runtimeCustomizerConfig_containerSecurityContext_readOnlyRootFilesystem: "false"
     PF_runtimeCustomizerConfig_containerSecurityContext_allowPrivilegeEscalation: "false"
-    PF_runtimeCustomizerConfig_containerSecurityContext_capabilities_drop: "ALL"
+    PF_runtimeCustomizerConfig_containerSecurityContext_capabilities_drop_0: "ALL"
 
   # CRITICAL: Mount the security customizer JAR from ConfigMap
   extraVolumes:
