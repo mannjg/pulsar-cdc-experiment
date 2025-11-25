@@ -81,29 +81,67 @@ verify_pulsar_pods() {
     done
 }
 
-# Verify security customizer ConfigMap
+# Verify security customizer (jar-server and init container approach)
 verify_security_customizer() {
     print_header "Verifying Security Customizer"
     
-    print_test "Checking if security customizer ConfigMap exists"
-    if kubectl get configmap pulsar-security-customizer -n "$NAMESPACE" >/dev/null 2>&1; then
-        print_pass "Security customizer ConfigMap exists"
+    # Check jar-server deployment
+    print_test "Checking if jar-server deployment exists"
+    if kubectl get deployment jar-server -n "$NAMESPACE" >/dev/null 2>&1; then
+        print_pass "JAR server deployment exists"
         
-        # Check if it contains the JAR file
-        print_test "Checking ConfigMap contents"
-        if kubectl get configmap pulsar-security-customizer -n "$NAMESPACE" -o jsonpath='{.binaryData}' | grep -q "pulsar-security-customizer-1.0.0.jar"; then
-            print_pass "ConfigMap contains security customizer JAR"
+        # Check deployment readiness
+        print_test "Checking jar-server deployment readiness"
+        local ready_replicas=$(kubectl get deployment jar-server -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        if [ "$ready_replicas" -gt 0 ]; then
+            print_pass "JAR server has $ready_replicas ready replica(s)"
         else
-            print_fail "ConfigMap missing security customizer JAR"
+            print_fail "JAR server has no ready replicas"
         fi
     else
-        print_fail "Security customizer ConfigMap does not exist"
+        print_fail "JAR server deployment does not exist"
+    fi
+    
+    # Check if jar-server is serving the artifact
+    print_test "Checking if jar-server is serving artifacts"
+    local jar_server_pod=$(kubectl get pod -l app=jar-server -n "$NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    
+    if [ -n "$jar_server_pod" ]; then
+        if kubectl exec -n "$NAMESPACE" "$jar_server_pod" -- ls /usr/share/nginx/html/libs/pulsar-security-customizer-1.0.0.jar >/dev/null 2>&1; then
+            print_pass "Security customizer JAR is available in jar-server"
+        else
+            print_fail "Security customizer JAR not found in jar-server"
+        fi
+        
+        # Check health endpoint
+        print_test "Checking jar-server health endpoint"
+        if kubectl exec -n "$NAMESPACE" "$jar_server_pod" -- curl -s http://localhost/health 2>/dev/null | grep -q "healthy"; then
+            print_pass "JAR server health endpoint is responding"
+        else
+            print_fail "JAR server health endpoint not responding"
+        fi
+    else
+        print_fail "Could not find jar-server pod"
+    fi
+    
+    # Check broker init container completion
+    print_test "Checking broker init container status"
+    local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    
+    if [ -n "$broker_pod" ]; then
+        local init_status=$(kubectl get pod "$broker_pod" -n "$NAMESPACE" -o jsonpath='{.status.initContainerStatuses[?(@.name=="download-broker-artifacts")].state.terminated.reason}' 2>/dev/null || echo "")
+        
+        if [ "$init_status" = "Completed" ]; then
+            print_pass "Broker init container completed successfully"
+        else
+            print_warning "Broker init container status: $init_status (expected: Completed)"
+        fi
+    else
+        print_fail "Could not find broker pod"
     fi
     
     # Check if JAR is mounted in broker
     print_test "Checking if security customizer is mounted in broker"
-    local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-    
     if [ -n "$broker_pod" ]; then
         if kubectl exec -n "$NAMESPACE" "$broker_pod" -- ls /pulsar/lib/pulsar-security-customizer-1.0.0.jar >/dev/null 2>&1; then
             print_pass "Security customizer JAR is mounted in broker"
