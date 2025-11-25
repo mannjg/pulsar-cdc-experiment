@@ -1,15 +1,41 @@
-# Pulsar CDC Experiment - Complete Helm Values
-# This configuration includes the SecurityContext customizer for Kubernetes runtime
-# Chart version: pulsar-4.4.0
+# ============================================================================
+# Pulsar CDC Experiment - Minimal Helm Values
+# ============================================================================
+# Chart: apache/pulsar version 4.4.0
 # Pulsar version: 4.1.2
+#
+# PURPOSE:
+# This configuration demonstrates Apache Pulsar Functions with custom security
+# contexts applied via a Kubernetes runtime customizer. This is the core of
+# the CDC (Change Data Capture) experiment.
+#
+# IMPORTANT: This file contains ONLY values that differ from the chart defaults.
+# All values below are intentional overrides. For default values, see:
+# https://github.com/apache/pulsar-helm-chart/blob/pulsar-4.4.0/charts/pulsar/values.yaml
+#
+# WARNING: LOCAL TESTING ONLY
+# - Single replicas (zookeeper: 1, bookkeeper: 1, broker: 1, proxy: 1)
+# - Minimal resources (50m CPU, 128-256Mi memory)
+# - No high availability
+# - No monitoring/observability stack
+# - Reduced volume sizes (5Gi/10Gi)
+# - Minimal replication (ensemble/quorum = 1)
+#
+# This configuration is NOT production-ready and is designed exclusively for
+# local development and testing of the security customizer functionality.
+# ============================================================================
 
-# Initialize cluster on install
+# ============================================================================
+# GLOBAL CONFIGURATION
+# ============================================================================
+
+# Initialize cluster on install (default: false)
 initialize: true
 
-# Override default Pulsar image tag globally
+# Pin Pulsar version to 3.3.5 across all components (default: uses chart appVersion)
 defaultPulsarImageTag: "4.1.2"
 
-# Override images for all components to use 4.1.2
+# Explicit version pinning for all component images (default: inherits from defaultPulsarImageTag)
 images:
   zookeeper:
     tag: "4.1.2"
@@ -24,71 +50,94 @@ images:
   functions:
     tag: "4.1.2"
 
-# Zookeeper configuration - minimal setup for local testing
+# ============================================================================
+# ZOOKEEPER CONFIGURATION
+# ============================================================================
+# Overrides: replica count (1 vs 3), reduced resources, simplified GC, no monitoring
+
 zookeeper:
-  replicaCount: 1
+  replicaCount: 1  # Default: 3
   resources:
     requests:
-      memory: 128Mi
-      cpu: 50m
+      memory: 128Mi  # Default: 256Mi
+      cpu: 50m       # Default: 100m
   configData:
-    PULSAR_MEM: "-Xms128m -Xmx256m"
-    PULSAR_GC: "-XX:+UseG1GC"
+    PULSAR_MEM: "-Xms128m -Xmx256m"  # Default: "-Xms64m -Xmx128m"
+    PULSAR_GC: "-XX:+UseG1GC"         # Default: comprehensive GC tuning
   podMonitor:
-    enabled: false
+    enabled: false  # Default: true
 
-# BookKeeper configuration - minimal setup
+# ============================================================================
+# BOOKKEEPER CONFIGURATION
+# ============================================================================
+# Overrides: replica count (1 vs 4), reduced resources, simplified GC, no monitoring
+
 bookkeeper:
-  replicaCount: 1
+  replicaCount: 1  # Default: 4
   resources:
     requests:
-      memory: 256Mi
-      cpu: 50m
+      memory: 256Mi  # Default: 512Mi
+      cpu: 50m       # Default: 200m
   configData:
-    PULSAR_MEM: "-Xms256m -Xmx512m"
-    PULSAR_GC: "-XX:+UseG1GC"
+    PULSAR_MEM: "-Xms256m -Xmx512m"  # Default: "-Xms128m -Xmx256m -XX:MaxDirectMemorySize=256m"
+    PULSAR_GC: "-XX:+UseG1GC"         # Default: comprehensive GC tuning
   podMonitor:
-    enabled: false
+    enabled: false  # Default: true
 
-# Broker configuration with Kubernetes runtime and SecurityContext customizer
+# ============================================================================
+# BROKER CONFIGURATION
+# ============================================================================
+# This is the heart of the CDC experiment. The broker is configured to:
+# 1. Run an embedded Functions Worker (functionsWorkerEnabled: true)
+# 2. Use Kubernetes runtime for function execution
+# 3. Apply custom security contexts via SecurityEnabledKubernetesManifestCustomizer
+# 4. Load the security customizer JAR via init container
+
 broker:
-  replicaCount: 1
+  replicaCount: 1  # Default: 3
   resources:
     requests:
-      memory: 256Mi
-      cpu: 50m
+      memory: 256Mi  # Default: 512Mi
+      cpu: 50m       # Default: 200m
   configData:
-    PULSAR_MEM: "-Xms256m -Xmx512m"
-    PULSAR_GC: "-XX:+UseG1GC"
-    managedLedgerDefaultEnsembleSize: "1"
-    managedLedgerDefaultWriteQuorum: "1"
-    managedLedgerDefaultAckQuorum: "1"
-    functionsWorkerEnabled: "true"
+    PULSAR_MEM: "-Xms256m -Xmx512m"                # Default: "-Xms128m -Xmx256m -XX:MaxDirectMemorySize=256m"
+    PULSAR_GC: "-XX:+UseG1GC"                       # Default: comprehensive GC tuning
+    managedLedgerDefaultEnsembleSize: "1"           # Default: not set (broker default)
+    managedLedgerDefaultWriteQuorum: "1"            # Default: not set (broker default)
+    managedLedgerDefaultAckQuorum: "1"              # Default: not set (broker default)
+    functionsWorkerEnabled: "true"                  # Default: not set
 
-    # Configure Kubernetes runtime for Functions Worker
+    # ========================================================================
+    # FUNCTIONS WORKER - KUBERNETES RUNTIME CONFIGURATION
+    # ========================================================================
+    # Configure the Functions Worker to use Kubernetes for function execution
     PF_functionRuntimeFactoryClassName: "org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory"
     PF_functionRuntimeFactoryConfigs_jobNamespace: "pulsar"
-    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:4.1.2"
+    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:3.3.5"
     PF_functionRuntimeFactoryConfigs_imagePullPolicy: "IfNotPresent"
     PF_functionRuntimeFactoryConfigs_pulsarRootDir: "/pulsar"
 
-    # CRITICAL: Security customizer configuration (Pulsar 4.x property name)
+    # ========================================================================
+    # SECURITY CUSTOMIZER CONFIGURATION (CORE OF CDC EXPERIMENT)
+    # ========================================================================
+    # Apply custom security contexts to function pods using our customizer
     PF_runtimeCustomizerClassName: "com.custom.pulsar.SecurityEnabledKubernetesManifestCustomizer"
 
-    # Pod SecurityContext settings
+    # Pod-level SecurityContext (applied to the entire pod)
     PF_runtimeCustomizerConfig_podSecurityContext_runAsNonRoot: "true"
     PF_runtimeCustomizerConfig_podSecurityContext_runAsUser: "10000"
     PF_runtimeCustomizerConfig_podSecurityContext_runAsGroup: "10000"
     PF_runtimeCustomizerConfig_podSecurityContext_fsGroup: "10000"
 
-    # Container SecurityContext settings
+    # Container-level SecurityContext (applied to function container)
     PF_runtimeCustomizerConfig_containerSecurityContext_runAsNonRoot: "true"
     PF_runtimeCustomizerConfig_containerSecurityContext_runAsUser: "10000"
     PF_runtimeCustomizerConfig_containerSecurityContext_readOnlyRootFilesystem: "false"
     PF_runtimeCustomizerConfig_containerSecurityContext_allowPrivilegeEscalation: "false"
     PF_runtimeCustomizerConfig_containerSecurityContext_capabilities_drop_0: "ALL"
 
-  # Init container to download artifacts from jar-server
+  # Init container to download the security customizer JAR from jar-server
+  # Default: no init containers
   initContainers:
   - name: download-broker-artifacts
     image: curlimages/curl:8.5.0
@@ -97,87 +146,103 @@ broker:
     - -c
     - |
       echo "Downloading broker artifacts..."
+
+      # Download libs
+      echo "Downloading libs..."
       curl -f -v -o /broker-libs/pulsar-security-customizer-1.0.0.jar \
         http://jar-server.pulsar.svc.cluster.local/libs/pulsar-security-customizer-1.0.0.jar
 
-      echo "Verifying downloaded artifacts..."
-      ls -lh /broker-libs/
+      echo "Download complete. Verifying artifacts..."
+      ls -lhR /broker-libs
     volumeMounts:
     - name: broker-libs
       mountPath: /broker-libs
 
-  # Volumes for artifact storage (semantic naming by artifact type)
+  # Volumes for artifact storage (default: no extra volumes)
   extraVolumes:
   - name: broker-libs
     emptyDir: {}
+  # Future: add broker-functions and broker-connectors volumes as needed
 
-  # Mount artifacts to appropriate Pulsar directories
+  # Mount security customizer JAR to Pulsar lib directory (default: no extra mounts)
   extraVolumeMounts:
   - name: broker-libs
     mountPath: /pulsar/lib/pulsar-security-customizer-1.0.0.jar
     subPath: pulsar-security-customizer-1.0.0.jar
     readOnly: true
+  # Future: add mounts for /pulsar/functions/ and /pulsar/connectors/
 
   podMonitor:
-    enabled: false
+    enabled: false  # Default: true
 
-# Proxy configuration - minimal setup
+# ============================================================================
+# PROXY CONFIGURATION
+# ============================================================================
+# Overrides: replica count (1 vs 3), reduced resources, simplified GC, no monitoring
+
 proxy:
-  replicaCount: 1
+  replicaCount: 1  # Default: 3
   resources:
     requests:
-      memory: 128Mi
-      cpu: 50m
+      memory: 128Mi  # Default: 128Mi (same)
+      cpu: 50m       # Default: 200m
   configData:
-    PULSAR_MEM: "-Xms128m -Xmx256m"
-    PULSAR_GC: "-XX:+UseG1GC"
+    PULSAR_MEM: "-Xms128m -Xmx256m"  # Default: "-Xms64m -Xmx64m -XX:MaxDirectMemorySize=64m"
+    PULSAR_GC: "-XX:+UseG1GC"         # Default: comprehensive GC tuning
   podMonitor:
-    enabled: false
+    enabled: false  # Default: true
 
-# Enable Pulsar Functions with runtime customization
+# ============================================================================
+# PULSAR FUNCTIONS CONFIGURATION
+# ============================================================================
+# Overrides: enable functions (default: false), enable customizer runtime
+
 functions:
-  enabled: true
-  enableCustomizerRuntime: true
-  functionReplicaCount: 1
-  rbac:
-    limit_to_namespace: true
+  enabled: true                    # Default: false (with security warning in chart)
+  enableCustomizerRuntime: true    # Default: not present
+  functionReplicaCount: 1          # Default: not present
   resources:
     requests:
       memory: 256Mi
       cpu: 50m
 
-# Disable monitoring components not needed for basic testing
+# ============================================================================
+# MONITORING STACK - ALL DISABLED
+# ============================================================================
+# Default: monitoring components are enabled, we disable them all for testing
+
 pulsar_manager:
-  enabled: false
+  enabled: false  # Default: false (same)
 
 grafana:
-  enabled: false
+  enabled: false  # Default: true (in kube-prometheus-stack)
 
 prometheus:
-  enabled: false
+  enabled: false  # Default: true (in kube-prometheus-stack)
 
 kube-prometheus-stack:
-  enabled: false
+  enabled: false  # Default: true
 
 victoria-metrics-k8s-stack:
-  enabled: false
+  enabled: false  # Default: not present
 
-# Disable all PodMonitor resources
 monitoring:
   podMonitor:
-    enabled: false
+    enabled: false  # Default: not present (individual components default to true)
 
-# Disable recovery PodMonitor
 pulsar_metadata:
   component: pulsar-init
   podMonitor:
-    enabled: false
+    enabled: false  # Default: not present
 
-# Volumes - use smaller sizes for testing
+# ============================================================================
+# VOLUME CONFIGURATION
+# ============================================================================
+# Overrides: use single volume (default: false), reduced sizes for testing
+
 volumes:
-  persistence: true
-  useSingleCommonVolume: true
+  useSingleCommonVolume: true  # Default: false
   journal:
-    size: 5Gi
+    size: 5Gi   # Default: 10Gi
   ledgers:
-    size: 10Gi
+    size: 10Gi  # Default: 50Gi
