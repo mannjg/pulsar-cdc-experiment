@@ -196,7 +196,7 @@ create_security_customizer_configmap() {
     print_success "Created security customizer ConfigMap"
 }
 
-# Deploy JAR artifact server (nginx)
+# Deploy JAR server for serving artifacts
 deploy_jar_server() {
     print_header "Deploying JAR Artifact Server"
 
