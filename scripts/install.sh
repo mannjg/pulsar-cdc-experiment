@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 # Configuration
 NAMESPACE="pulsar"
 HELM_RELEASE_NAME="pulsar"
-PULSAR_CHART_VERSION="4.4.0"
+PULSAR_CHART_VERSION="3.9.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
