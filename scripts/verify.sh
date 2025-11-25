@@ -115,7 +115,7 @@ verify_security_customizer() {
 
         # Verify jar-server is accessible via service
         print_test "Verifying jar-server service accessibility"
-        if kubectl exec -n "$NAMESPACE" "$jar_server_pod" -- wget -q -O /dev/null http://localhost/libs/pulsar-security-customizer-1.0.0.jar 2>/dev/null; then
+        if kubectl exec -n "$NAMESPACE" "$jar_server_pod" -- curl -f -s -o /dev/null http://127.0.0.1/libs/pulsar-security-customizer-1.0.0.jar 2>/dev/null; then
             print_pass "JAR is accessible via HTTP"
         else
             print_fail "JAR not accessible via HTTP"
