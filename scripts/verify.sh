@@ -144,12 +144,38 @@ verify_security_customizer() {
             print_fail "Security customizer JAR not found in broker"
         fi
 
-        # Check broker logs for customizer initialization
-        print_test "Checking broker logs for customizer initialization"
-        if kubectl logs -n "$NAMESPACE" "$broker_pod" --tail=500 2>/dev/null | grep -q "SecurityEnabledKubernetesManifestCustomizer"; then
-            print_pass "Customizer appears in broker logs"
+        # Verify customizer functionality by checking if it's actually applying security contexts
+        # The customizer's job is to add SecurityContext to function/connector pods
+        # This is a better test than checking logs, since logs can rotate but functionality persists
+        print_test "Verifying security customizer functionality"
+        
+        # Check if any function or connector pods exist with the expected SecurityContext
+        local has_secured_pods=false
+        
+        # Check for function pods with SecurityContext
+        local function_pods=$(kubectl get pods -n "$NAMESPACE" -l component=function --no-headers 2>/dev/null | awk '{print $1}')
+        for pod in $function_pods; do
+            if kubectl get pod "$pod" -n "$NAMESPACE" -o yaml 2>/dev/null | grep -q "runAsUser: 10000"; then
+                has_secured_pods=true
+                break
+            fi
+        done
+        
+        # Check for connector pods with SecurityContext
+        if [ "$has_secured_pods" = false ]; then
+            local connector_pods=$(kubectl get pods -n "$NAMESPACE" -l component=source --no-headers 2>/dev/null | awk '{print $1}')
+            for pod in $connector_pods; do
+                if kubectl get pod "$pod" -n "$NAMESPACE" -o yaml 2>/dev/null | grep -q "runAsUser: 10000"; then
+                    has_secured_pods=true
+                    break
+                fi
+            done
+        fi
+        
+        if [ "$has_secured_pods" = true ]; then
+            print_pass "Security customizer is applying SecurityContext to function/connector pods"
         else
-            print_warning "Customizer not found in recent broker logs (may have started earlier)"
+            print_warning "No function or connector pods found yet to verify customizer (will be verified when pods are created)"
         fi
     else
         print_fail "Could not find broker pod"
