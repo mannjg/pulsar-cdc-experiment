@@ -111,6 +111,39 @@ delete_postgres() {
     fi
 }
 
+# Delete JAR server
+delete_jar_server() {
+    print_header "Deleting JAR Artifact Server"
+
+    if kubectl get deployment jar-server -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete deployment jar-server -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server deployment deleted"
+    else
+        print_info "JAR server deployment not found"
+    fi
+
+    if kubectl get service jar-server -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete service jar-server -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server service deleted"
+    else
+        print_info "JAR server service not found"
+    fi
+
+    if kubectl get configmap jar-server-nginx-config -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete configmap jar-server-nginx-config -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server nginx ConfigMap deleted"
+    else
+        print_info "JAR server nginx ConfigMap not found"
+    fi
+
+    if kubectl get configmap jar-server-content -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete configmap jar-server-content -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server content ConfigMap deleted"
+    else
+        print_info "JAR server content ConfigMap not found"
+    fi
+}
+
 # Delete function and connector StatefulSets
 delete_compute_resources() {
     print_header "Deleting Function and Connector Resources"
@@ -218,6 +251,7 @@ main() {
     delete_debezium_connector
     delete_compute_resources
     delete_postgres
+    delete_jar_server
     uninstall_pulsar
     delete_pvcs
     delete_namespace

@@ -196,6 +196,53 @@ create_security_customizer_configmap() {
     print_success "Created security customizer ConfigMap"
 }
 
+# Deploy JAR server for serving artifacts
+deploy_jar_server() {
+    print_header "Deploying JAR Artifact Server"
+
+    local jar_path="$PROJECT_ROOT/security-customizer/target/pulsar-security-customizer-1.0.0.jar"
+    local jar_server_manifest="$PROJECT_ROOT/kubernetes/manifests/jar-server.yaml"
+
+    if [ ! -f "$jar_path" ]; then
+        print_error "Security customizer JAR not found at: $jar_path"
+        exit 1
+    fi
+
+    if [ ! -f "$jar_server_manifest" ]; then
+        print_error "JAR server manifest not found at: $jar_server_manifest"
+        exit 1
+    fi
+
+    # Create jar-server-content ConfigMap from JAR files
+    print_info "Creating jar-server-content ConfigMap..."
+    if kubectl get configmap jar-server-content -n "$NAMESPACE" >/dev/null 2>&1; then
+        print_info "ConfigMap already exists, deleting and recreating..."
+        kubectl delete configmap jar-server-content -n "$NAMESPACE"
+    fi
+
+    kubectl create configmap jar-server-content \
+        --from-file=pulsar-security-customizer-1.0.0.jar="$jar_path" \
+        -n "$NAMESPACE"
+
+    print_success "Created jar-server-content ConfigMap"
+
+    # Deploy jar-server manifest
+    print_info "Deploying jar-server..."
+    if kubectl get deployment jar-server -n "$NAMESPACE" >/dev/null 2>&1; then
+        print_info "JAR server already deployed, reapplying manifest..."
+        kubectl apply -f "$jar_server_manifest"
+    else
+        kubectl apply -f "$jar_server_manifest"
+    fi
+
+    print_success "JAR server manifest applied"
+
+    # Wait for jar-server to be ready
+    wait_for_pods "app=jar-server" "JAR Server" 300
+
+    print_success "JAR server is ready"
+}
+
 # Add Helm repository
 add_helm_repo() {
     print_header "Configuring Helm Repository"
@@ -533,6 +580,7 @@ main() {
     check_prerequisites
     create_namespace
     create_security_customizer_configmap
+    deploy_jar_server
     add_helm_repo
     install_pulsar
     wait_for_pulsar

@@ -88,13 +88,32 @@ broker:
     PF_runtimeCustomizerConfig_containerSecurityContext_allowPrivilegeEscalation: "false"
     PF_runtimeCustomizerConfig_containerSecurityContext_capabilities_drop_0: "ALL"
 
-  # CRITICAL: Mount the security customizer JAR from ConfigMap
+  # Init container to download artifacts from jar-server
+  initContainers:
+  - name: download-broker-artifacts
+    image: curlimages/curl:8.5.0
+    command:
+    - sh
+    - -c
+    - |
+      echo "Downloading broker artifacts..."
+      curl -f -v -o /broker-libs/pulsar-security-customizer-1.0.0.jar \
+        http://jar-server.pulsar.svc.cluster.local/libs/pulsar-security-customizer-1.0.0.jar
+
+      echo "Verifying downloaded artifacts..."
+      ls -lh /broker-libs/
+    volumeMounts:
+    - name: broker-libs
+      mountPath: /broker-libs
+
+  # Volumes for artifact storage (semantic naming by artifact type)
   extraVolumes:
-  - name: security-customizer
-    configMap:
-      name: pulsar-security-customizer
+  - name: broker-libs
+    emptyDir: {}
+
+  # Mount artifacts to appropriate Pulsar directories
   extraVolumeMounts:
-  - name: security-customizer
+  - name: broker-libs
     mountPath: /pulsar/lib/pulsar-security-customizer-1.0.0.jar
     subPath: pulsar-security-customizer-1.0.0.jar
     readOnly: true
