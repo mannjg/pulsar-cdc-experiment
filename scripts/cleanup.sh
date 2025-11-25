@@ -14,6 +14,8 @@ NC='\033[0m' # No Color
 # Configuration
 NAMESPACE="pulsar"
 HELM_RELEASE_NAME="pulsar"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Print functions
 print_header() {
@@ -89,6 +91,38 @@ delete_debezium_connector() {
         fi
     else
         print_info "Broker pod not found, skipping connector deletion"
+    fi
+}
+
+# Delete JAR artifact server
+delete_jar_server() {
+    print_header "Deleting JAR Artifact Server"
+
+    # Delete jar-server resources
+    local jar_server_manifest="$PROJECT_ROOT/kubernetes/manifests/jar-server.yaml"
+
+    if [ -f "$jar_server_manifest" ]; then
+        print_info "Deleting jar-server manifest resources..."
+        kubectl delete -f "$jar_server_manifest" -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server resources deleted"
+    else
+        print_info "JAR server manifest not found, skipping"
+    fi
+
+    # Delete artifact content ConfigMaps
+    if kubectl get configmap jar-server-content -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete configmap jar-server-content -n "$NAMESPACE"
+        print_success "Artifact content ConfigMap deleted"
+    else
+        print_info "Artifact content ConfigMap not found"
+    fi
+
+    # Delete nginx config ConfigMap (if it wasn't deleted by manifest)
+    if kubectl get configmap jar-server-nginx-config -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete configmap jar-server-nginx-config -n "$NAMESPACE"
+        print_success "Nginx config ConfigMap deleted"
+    else
+        print_info "Nginx config ConfigMap not found"
     fi
 }
 
