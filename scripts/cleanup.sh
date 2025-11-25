@@ -98,31 +98,32 @@ delete_debezium_connector() {
 delete_jar_server() {
     print_header "Deleting JAR Artifact Server"
 
-    # Delete jar-server resources
-    local jar_server_manifest="$PROJECT_ROOT/kubernetes/manifests/jar-server.yaml"
-
-    if [ -f "$jar_server_manifest" ]; then
-        print_info "Deleting jar-server manifest resources..."
-        kubectl delete -f "$jar_server_manifest" -n "$NAMESPACE" --ignore-not-found=true
-        print_success "JAR server resources deleted"
+    if kubectl get deployment jar-server -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete deployment jar-server -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server deployment deleted"
     else
-        print_info "JAR server manifest not found, skipping"
+        print_info "JAR server deployment not found"
     fi
 
-    # Delete artifact content ConfigMaps
-    if kubectl get configmap jar-server-content -n "$NAMESPACE" >/dev/null 2>&1; then
-        kubectl delete configmap jar-server-content -n "$NAMESPACE"
-        print_success "Artifact content ConfigMap deleted"
+    if kubectl get service jar-server -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete service jar-server -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server service deleted"
     else
-        print_info "Artifact content ConfigMap not found"
+        print_info "JAR server service not found"
     fi
 
-    # Delete nginx config ConfigMap (if it wasn't deleted by manifest)
     if kubectl get configmap jar-server-nginx-config -n "$NAMESPACE" >/dev/null 2>&1; then
-        kubectl delete configmap jar-server-nginx-config -n "$NAMESPACE"
-        print_success "Nginx config ConfigMap deleted"
+        kubectl delete configmap jar-server-nginx-config -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server nginx ConfigMap deleted"
     else
-        print_info "Nginx config ConfigMap not found"
+        print_info "JAR server nginx ConfigMap not found"
+    fi
+
+    if kubectl get configmap jar-server-content -n "$NAMESPACE" >/dev/null 2>&1; then
+        kubectl delete configmap jar-server-content -n "$NAMESPACE" --ignore-not-found=true
+        print_success "JAR server content ConfigMap deleted"
+    else
+        print_info "JAR server content ConfigMap not found"
     fi
 }
 

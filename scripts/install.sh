@@ -203,71 +203,44 @@ deploy_jar_server() {
     local jar_path="$PROJECT_ROOT/security-customizer/target/pulsar-security-customizer-1.0.0.jar"
     local jar_server_manifest="$PROJECT_ROOT/kubernetes/manifests/jar-server.yaml"
 
-    # Verify JAR file exists
     if [ ! -f "$jar_path" ]; then
         print_error "Security customizer JAR not found at: $jar_path"
-        print_info "Please build the security customizer first"
         exit 1
     fi
 
-    # Verify manifest exists
     if [ ! -f "$jar_server_manifest" ]; then
         print_error "JAR server manifest not found at: $jar_server_manifest"
         exit 1
     fi
 
-    # Create directory structure for artifacts in ConfigMap
-    print_info "Creating artifact content ConfigMap..."
-    local temp_dir=$(mktemp -d)
-    mkdir -p "$temp_dir/libs"
-    cp "$jar_path" "$temp_dir/libs/"
-
-    # Check if ConfigMap exists and delete if present
+    # Create jar-server-content ConfigMap from JAR files
+    print_info "Creating jar-server-content ConfigMap..."
     if kubectl get configmap jar-server-content -n "$NAMESPACE" >/dev/null 2>&1; then
-        print_info "Artifact content ConfigMap already exists, recreating..."
+        print_info "ConfigMap already exists, deleting and recreating..."
         kubectl delete configmap jar-server-content -n "$NAMESPACE"
     fi
 
-    # Create ConfigMap with artifact content (flat keys, will be organized by init container)
     kubectl create configmap jar-server-content \
-        --from-file=pulsar-security-customizer-1.0.0.jar="$temp_dir/libs/pulsar-security-customizer-1.0.0.jar" \
+        --from-file=pulsar-security-customizer-1.0.0.jar="$jar_path" \
         -n "$NAMESPACE"
 
-    # Clean up temp directory
-    rm -rf "$temp_dir"
-
-    print_success "Created artifact content ConfigMap"
+    print_success "Created jar-server-content ConfigMap"
 
     # Deploy jar-server manifest
-    print_info "Deploying jar-server (nginx)..."
-    kubectl apply -f "$jar_server_manifest" -n "$NAMESPACE"
-
-    # Wait for jar-server deployment to be ready
-    print_info "Waiting for jar-server to be ready..."
-    kubectl wait --for=condition=available --timeout=120s \
-        deployment/jar-server -n "$NAMESPACE" || {
-        print_error "jar-server deployment failed to become ready"
-        kubectl logs -l app=jar-server -n "$NAMESPACE" --tail=50
-        exit 1
-    }
-
-    # Verify the server is serving artifacts
-    print_info "Verifying artifact server..."
-    local jar_server_pod=$(kubectl get pod -l app=jar-server -n "$NAMESPACE" -o jsonpath='{.items[0].metadata.name}')
-
-    if kubectl exec "$jar_server_pod" -n "$NAMESPACE" -- \
-        curl -s http://localhost/health 2>/dev/null | grep -q "healthy"; then
-        print_success "JAR artifact server is healthy and serving artifacts"
-
-        # Verify artifact structure
-        print_info "Available artifacts:"
-        kubectl exec "$jar_server_pod" -n "$NAMESPACE" -- ls -lhR /usr/share/nginx/html/ | head -20
+    print_info "Deploying jar-server..."
+    if kubectl get deployment jar-server -n "$NAMESPACE" >/dev/null 2>&1; then
+        print_info "JAR server already deployed, reapplying manifest..."
+        kubectl apply -f "$jar_server_manifest"
     else
-        print_error "Failed to verify artifact server health"
-        exit 1
+        kubectl apply -f "$jar_server_manifest"
     fi
 
-    print_success "JAR artifact server deployed successfully"
+    print_success "JAR server manifest applied"
+
+    # Wait for jar-server to be ready
+    wait_for_pods "app=jar-server" "JAR Server" 300
+
+    print_success "JAR server is ready"
 }
 
 # Add Helm repository
@@ -606,6 +579,7 @@ main() {
     
     check_prerequisites
     create_namespace
+    create_security_customizer_configmap
     deploy_jar_server
     add_helm_repo
     install_pulsar
