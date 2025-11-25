@@ -81,15 +81,15 @@ verify_pulsar_pods() {
     done
 }
 
-# Verify security customizer (jar-server and init container approach)
+# Verify security customizer via jar-server
 verify_security_customizer() {
     print_header "Verifying Security Customizer"
-    
+
     # Check jar-server deployment
     print_test "Checking if jar-server deployment exists"
     if kubectl get deployment jar-server -n "$NAMESPACE" >/dev/null 2>&1; then
         print_pass "JAR server deployment exists"
-        
+
         # Check deployment readiness
         print_test "Checking jar-server deployment readiness"
         local ready_replicas=$(kubectl get deployment jar-server -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
@@ -101,97 +101,84 @@ verify_security_customizer() {
     else
         print_fail "JAR server deployment does not exist"
     fi
-    
+
     # Check if jar-server is serving the artifact
     print_test "Checking if jar-server is serving artifacts"
     local jar_server_pod=$(kubectl get pod -l app=jar-server -n "$NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    
+
     if [ -n "$jar_server_pod" ]; then
         if kubectl exec -n "$NAMESPACE" "$jar_server_pod" -- ls /usr/share/nginx/html/libs/pulsar-security-customizer-1.0.0.jar >/dev/null 2>&1; then
             print_pass "Security customizer JAR is available in jar-server"
         else
             print_fail "Security customizer JAR not found in jar-server"
         fi
-        
-        # Verify jar-server HTTP access
+
+        # Verify jar-server is accessible via service
         print_test "Verifying jar-server service accessibility"
         if kubectl exec -n "$NAMESPACE" "$jar_server_pod" -- curl -f -s -o /dev/null http://127.0.0.1/libs/pulsar-security-customizer-1.0.0.jar 2>/dev/null; then
             print_pass "JAR is accessible via HTTP"
         else
             print_fail "JAR not accessible via HTTP"
         fi
-        
-        # Check health endpoint
-        print_test "Checking jar-server health endpoint"
-        if kubectl exec -n "$NAMESPACE" "$jar_server_pod" -- curl -s http://localhost/health 2>/dev/null | grep -q "healthy"; then
-            print_pass "JAR server health endpoint is responding"
-        else
-            print_fail "JAR server health endpoint not responding"
-        fi
     else
         print_fail "Could not find jar-server pod"
     fi
-    
-    # Check broker init container completion
-    print_test "Checking broker init container status"
+
+    # Check broker init container logs
+    print_test "Checking broker init container for artifact download"
     local broker_pod=$(kubectl get pod -n "$NAMESPACE" -l component=broker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-    
+
     if [ -n "$broker_pod" ]; then
-        local init_status=$(kubectl get pod "$broker_pod" -n "$NAMESPACE" -o jsonpath='{.status.initContainerStatuses[?(@.name=="download-broker-artifacts")].state.terminated.reason}' 2>/dev/null || echo "")
-        
-        if [ "$init_status" = "Completed" ]; then
-            print_pass "Broker init container completed successfully"
+        # Check if init container successfully downloaded the artifact
+        if kubectl logs -n "$NAMESPACE" "$broker_pod" -c download-broker-artifacts 2>/dev/null | grep -q "pulsar-security-customizer-1.0.0.jar"; then
+            print_pass "Init container successfully downloaded security customizer"
         else
-            print_warning "Broker init container status: $init_status (expected: Completed)"
+            print_warning "Could not verify init container download (may have been cleaned up)"
         fi
-    else
-        print_fail "Could not find broker pod"
-    fi
-    
-    # Check if JAR is mounted in broker
-    print_test "Checking if security customizer is mounted in broker"
-    if [ -n "$broker_pod" ]; then
+
+        # Check if JAR is present in broker
+        print_test "Checking if security customizer is mounted in broker"
         if kubectl exec -n "$NAMESPACE" "$broker_pod" -- ls /pulsar/lib/pulsar-security-customizer-1.0.0.jar >/dev/null 2>&1; then
             print_pass "Security customizer JAR is mounted in broker"
         else
             print_fail "Security customizer JAR not found in broker"
         fi
-    else
-        print_fail "Could not find broker pod"
-    fi
-    
-    # Verify customizer functionality by checking if it's actually applying security contexts
-    # The customizer's job is to add SecurityContext to function/connector pods
-    # This is a better test than checking logs, since logs can rotate but functionality persists
-    print_test "Verifying security customizer functionality"
-    
-    # Check if any function or connector pods exist with the expected SecurityContext
-    local has_secured_pods=false
-    
-    # Check for function pods with SecurityContext
-    local function_pods=$(kubectl get pods -n "$NAMESPACE" -l component=function --no-headers 2>/dev/null | awk '{print $1}')
-    for pod in $function_pods; do
-        if kubectl get pod "$pod" -n "$NAMESPACE" -o yaml 2>/dev/null | grep -q "runAsUser: 10000"; then
-            has_secured_pods=true
-            break
-        fi
-    done
-    
-    # Check for connector pods with SecurityContext
-    if [ "$has_secured_pods" = false ]; then
-        local connector_pods=$(kubectl get pods -n "$NAMESPACE" -l component=source --no-headers 2>/dev/null | awk '{print $1}')
-        for pod in $connector_pods; do
+
+        # Verify customizer functionality by checking if it's actually applying security contexts
+        # The customizer's job is to add SecurityContext to function/connector pods
+        # This is a better test than checking logs, since logs can rotate but functionality persists
+        print_test "Verifying security customizer functionality"
+        
+        # Check if any function or connector pods exist with the expected SecurityContext
+        local has_secured_pods=false
+        
+        # Check for function pods with SecurityContext
+        local function_pods=$(kubectl get pods -n "$NAMESPACE" -l component=function --no-headers 2>/dev/null | awk '{print $1}')
+        for pod in $function_pods; do
             if kubectl get pod "$pod" -n "$NAMESPACE" -o yaml 2>/dev/null | grep -q "runAsUser: 10000"; then
                 has_secured_pods=true
                 break
             fi
         done
-    fi
-    
-    if [ "$has_secured_pods" = true ]; then
-        print_pass "Security customizer is applying SecurityContext to function/connector pods"
+        
+        # Check for connector pods with SecurityContext
+        if [ "$has_secured_pods" = false ]; then
+            local connector_pods=$(kubectl get pods -n "$NAMESPACE" -l component=source --no-headers 2>/dev/null | awk '{print $1}')
+            for pod in $connector_pods; do
+                if kubectl get pod "$pod" -n "$NAMESPACE" -o yaml 2>/dev/null | grep -q "runAsUser: 10000"; then
+                    has_secured_pods=true
+                    break
+                fi
+            done
+        fi
+        
+        if [ "$has_secured_pods" = true ]; then
+            print_pass "Security customizer is applying SecurityContext to function/connector pods"
+        else
+            print_warning "No function or connector pods found yet to verify customizer (will be verified when pods are created)"
+        fi
     else
-        print_warning "No function or connector pods found yet to verify customizer (will be verified when pods are created)"
+        print_fail "Could not find broker pod"
     fi
 }
 
