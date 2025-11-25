@@ -1,19 +1,28 @@
 # Pulsar CDC Experiment - Complete Helm Values
 # This configuration includes the SecurityContext customizer for Kubernetes runtime
 # Chart version: pulsar-4.4.0
-# Pulsar version: 4.0.2
+# Pulsar version: 4.1.2
 
 # Initialize cluster on install
 initialize: true
 
-# Use specific image version for broker and functions
-image:
+# Override default Pulsar image tag globally
+defaultPulsarImageTag: "4.1.2"
+
+# Override images for all components to use 4.1.2
+images:
+  zookeeper:
+    tag: "4.1.2"
+  bookie:
+    tag: "4.1.2"
   broker:
-    repository: apachepulsar/pulsar
-    tag: 4.0.2
-  function:
-    repository: apachepulsar/pulsar
-    tag: 4.0.2
+    tag: "4.1.2"
+  toolset:
+    tag: "4.1.2"
+  proxy:
+    tag: "4.1.2"
+  functions:
+    tag: "4.1.2"
 
 # Zookeeper configuration - minimal setup for local testing
 zookeeper:
@@ -59,7 +68,7 @@ broker:
     # Configure Kubernetes runtime for Functions Worker
     PF_functionRuntimeFactoryClassName: "org.apache.pulsar.functions.runtime.kubernetes.KubernetesRuntimeFactory"
     PF_functionRuntimeFactoryConfigs_jobNamespace: "pulsar"
-    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:4.0.2"
+    PF_functionRuntimeFactoryConfigs_pulsarDockerImageName: "apachepulsar/pulsar:4.1.2"
     PF_functionRuntimeFactoryConfigs_imagePullPolicy: "IfNotPresent"
     PF_functionRuntimeFactoryConfigs_pulsarRootDir: "/pulsar"
 

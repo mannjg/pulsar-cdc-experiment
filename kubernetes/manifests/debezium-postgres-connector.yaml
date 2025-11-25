@@ -17,6 +17,9 @@ configs:
   database.dbname: "inventory"
   database.server.name: "dbserver1"
 
+  # Topic prefix (required in Pulsar 4.1.2 / Debezium 3.2+)
+  topic.prefix: "dbserver1"
+
   # Schema and table filtering
   table.include.list: "public.customers"
 
@@ -42,10 +45,13 @@ configs:
   # Decimal handling
   decimal.handling.mode: "double"
 
-  # Key and value converters - use String converter to avoid schema issues
-  key.converter: "org.apache.kafka.connect.storage.StringConverter"
-  value.converter: "org.apache.kafka.connect.json.JsonConverter"
-  value.converter.schemas.enable: "false"
+  # Schema configuration
+  # json-with-envelope forces Schema.BYTES for both key and value schemas
+  # This prevents the BYTES -> JSON schema incompatibility that occurs when:
+  # - Snapshot mode (0 records) creates topic with BYTES schema
+  # - Streaming mode (real CDC events) tries to register JSON schemas
+  # Reference: KafkaConnectSource.java lines 134-149
+  json-with-envelope: "true"
 
 # Kubernetes runtime configuration for StatefulSet deployment
 customRuntimeOptions: |
